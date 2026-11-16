@@ -1,0 +1,36 @@
+﻿# Python virtual environment
+.venv/
+venv/
+env/
+# Dataset - download separately from Kaggle
+data/raw/*.csv
+data/processed/*.csv
+
+# Generated preprocessing models
+models/preprocessing/*.pkl
+
+# Python cache
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# VS Code
+.vscode/
+
+# Environment variables
+.env
+.env.*
+
+# Logs
+logs/
+*.log
+
+# Temporary files
+*.tmp
+
+# Operating system
+.DS_Store
+Thumbs.db

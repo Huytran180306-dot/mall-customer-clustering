@@ -1,0 +1,49 @@
+project:
+  name: Mall_Customer_Clustering
+  version: 1.0.0
+  random_state: 42
+
+data:
+  raw_path: data/raw/Mall_Customers.csv
+  processed_path: data/processed/
+
+  target_features:
+    - Age
+    - Annual Income (k$)
+    - Spending Score (1-100)
+
+  categorical_features:
+    - Gender
+
+  id_column: CustomerID
+
+preprocessing:
+  scaler: StandardScaler
+  encoding: OneHotEncoder
+  handle_missing_values: true
+
+model:
+  name: KMeans
+  implementation: numpy
+
+  n_clusters: 5
+  max_iterations: 300
+  tolerance: 0.0001
+  random_state: 42
+
+evaluation:
+  metrics:
+    - silhouette_score
+    - davies_bouldin_score
+    - calinski_harabasz_score
+
+tracking:
+  enabled: true
+  run_id_format: "%Y%m%d_%H%M%S"
+
+paths:
+  models: models/
+  logs: logs/
+  reports: reports/
+  figures: reports/figures/customer_segmentation/
+  progress: progress_results/
