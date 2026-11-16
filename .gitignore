@@ -34,3 +34,10 @@ logs/
 # Operating system
 .DS_Store
 Thumbs.db
+# Cac lan chay pipeline tu dong
+progress_results/RUN_*/
+
+# Cache va du lieu tam
+.ipython/
+.coverage
+htmlcov/

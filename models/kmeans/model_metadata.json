@@ -1,0 +1,24 @@
+{
+    "model_name": "Mall Customer K-Means",
+    "algorithm": "K-Means",
+    "configuration": "with_gender_minmax_k2",
+    "n_clusters": 2,
+    "max_iter": 300,
+    "random_state": 42,
+    "scaler": "MinMaxScaler",
+    "features": [
+        "Gender",
+        "Age",
+        "Annual Income (k$)",
+        "Spending Score (1-100)"
+    ],
+    "gender_mapping": {
+        "Male": 0,
+        "Female": 1
+    },
+    "training_samples": 200,
+    "cluster_sizes": {
+        "0": 88,
+        "1": 112
+    }
+}
