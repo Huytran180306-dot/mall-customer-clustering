@@ -1,3 +1,15 @@
+"""
+Experiments module for Mall Customer Clustering.
+
+Responsibilities:
+1. Load and validate raw customer data.
+2. Run 36 K-Means experiments.
+3. Compare feature spaces and scaling methods.
+4. Evaluate clustering using internal metrics.
+5. Save experimental results and visualizations.
+6. Summarize the best configurations.
+"""
+
 import sys
 from pathlib import Path
 
@@ -13,128 +25,262 @@ from sklearn.metrics import (
     calinski_harabasz_score
 )
 
-ROOT_DIR = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT_DIR))
 
+# ============================================================
+# 1. PROJECT CONFIGURATION
+# ============================================================
+
+ROOT_DIR = Path(__file__).resolve().parent.parent
+
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
+
+from src.config import get_config, get_path
 from src.models.kmeans import KMeans
 
 
-# ==========================================
-# CONFIGURATION
-# ==========================================
+# ============================================================
+# 2. LOAD CENTRALIZED CONFIGURATION
+# ============================================================
 
-DATA_PATH = ROOT_DIR / "data/raw/Mall_Customers.csv"
+DATA_PATH = get_path("data", "raw_path")
 
-RESULT_DIR = ROOT_DIR / "progress_results"
+RESULT_DIR = get_path("paths", "progress")
 
 FIGURE_DIR = (
-    ROOT_DIR
-    / "reports/figures/customer_segmentation/05_extended/experiments"
+    get_path("paths", "figures")
+    / "05_extended"
+    / "experiments"
 )
 
-K_VALUES = range(2, 11)
+K_VALUES = get_config("experiments", "k_values")
 
-RANDOM_STATE = 42
-MAX_ITER = 300
-TOLERANCE = 0.0001
+RANDOM_STATE = get_config(
+    "model", "random_state",
+    default=get_config("project", "random_state", default=42)
+)
+
+MAX_ITER = get_config(
+    "model", "max_iterations", default=300
+)
+
+TOLERANCE = get_config(
+    "model", "tolerance", default=0.0001
+)
+
+INITIALIZATION = get_config(
+    "model", "initialization", default="k-means++"
+)
+
+GENDER_MAPPING = get_config(
+    "preprocessing", "encoding", "mapping"
+)
+
+HANDLE_MISSING = get_config(
+    "preprocessing", "handle_missing_values", default=True
+)
+
+DROP_DUPLICATES = get_config(
+    "preprocessing", "drop_duplicates", default=True
+)
+
+CONFIG_FEATURE_SPACES = get_config(
+    "experiments", "feature_spaces"
+)
+
+CONFIG_SCALERS = get_config(
+    "experiments", "scalers"
+)
+
+CONFIG_METRICS = get_config(
+    "evaluation", "metrics"
+)
+
+
+# ============================================================
+# 3. SCALER AND METRIC REGISTRY
+# ============================================================
+
+SCALER_CLASSES = {
+    "StandardScaler": StandardScaler,
+    "MinMaxScaler": MinMaxScaler
+}
+
+METRIC_REGISTRY = {
+    "silhouette_score": (
+        "Silhouette_Score",
+        silhouette_score,
+        "max"
+    ),
+    "davies_bouldin_score": (
+        "Davies_Bouldin_Index",
+        davies_bouldin_score,
+        "min"
+    ),
+    "calinski_harabasz_score": (
+        "Calinski_Harabasz_Score",
+        calinski_harabasz_score,
+        "max"
+    )
+}
+
+FEATURE_SPACE_LABELS = {
+    "without_gender": "Without_Gender",
+    "with_gender": "With_Gender"
+}
+
+
+# ============================================================
+# 4. PREPARE DIRECTORIES
+# ============================================================
 
 RESULT_DIR.mkdir(parents=True, exist_ok=True)
 FIGURE_DIR.mkdir(parents=True, exist_ok=True)
 
 
-# ==========================================
-# 1. LOAD RAW DATA
-# ==========================================
+# ============================================================
+# 5. LOAD RAW DATA
+# ============================================================
 
 def load_data():
 
     print("\n========== LOADING RAW DATA ==========")
 
     if not DATA_PATH.exists():
-        raise FileNotFoundError(DATA_PATH)
+        raise FileNotFoundError(
+            f"Dataset not found: {DATA_PATH}"
+        )
 
     df = pd.read_csv(DATA_PATH)
 
-    df = df.drop_duplicates().dropna().copy()
+    if DROP_DUPLICATES:
+        df = df.drop_duplicates()
 
-    df["Gender"] = df["Gender"].map({
-        "Male": 0,
-        "Female": 1
-    })
+    if HANDLE_MISSING:
+        df = df.dropna()
+
+    df = df.copy()
+
+    if "Gender" not in df.columns:
+        raise ValueError(
+            "Gender column not found in dataset."
+        )
+
+    if not GENDER_MAPPING:
+        raise ValueError(
+            "Gender mapping is missing in config.yaml."
+        )
+
+    gender_values = df["Gender"].astype(str).str.strip()
+
+    df["Gender"] = gender_values.map(GENDER_MAPPING)
 
     if df["Gender"].isna().any():
-        raise ValueError("Unexpected Gender values.")
+        raise ValueError(
+            "Unexpected Gender values detected."
+        )
 
     print("Dataset shape:", df.shape)
 
     return df
 
 
-# ==========================================
-# 2. DEFINE EXPERIMENTS
-# ==========================================
+# ============================================================
+# 6. DEFINE EXPERIMENT CONFIGURATIONS
+# ============================================================
 
 def get_experiment_configs():
 
-    feature_spaces = {
+    print("\n========== LOADING EXPERIMENT CONFIGURATIONS ==========")
 
-        "Without_Gender": [
-            "Age",
-            "Annual Income (k$)",
-            "Spending Score (1-100)"
-        ],
+    if not CONFIG_FEATURE_SPACES:
+        raise ValueError(
+            "Feature spaces are missing in config.yaml."
+        )
 
-        "With_Gender": [
-            "Gender",
-            "Age",
-            "Annual Income (k$)",
-            "Spending Score (1-100)"
-        ]
+    if not CONFIG_SCALERS:
+        raise ValueError(
+            "Scaler configurations are missing in config.yaml."
+        )
 
-    }
+    feature_spaces = {}
 
-    scalers = {
+    for name, features in CONFIG_FEATURE_SPACES.items():
 
-        "StandardScaler": StandardScaler,
+        label = FEATURE_SPACE_LABELS.get(name, name)
 
-        "MinMaxScaler": MinMaxScaler
+        feature_spaces[label] = features
 
-    }
+    scalers = {}
+
+    for scaler_name in CONFIG_SCALERS:
+
+        if scaler_name not in SCALER_CLASSES:
+            raise ValueError(
+                f"Unsupported scaler: {scaler_name}"
+            )
+
+        scalers[scaler_name] = SCALER_CLASSES[scaler_name]
+
+    print("Feature spaces:", list(feature_spaces.keys()))
+
+    print("Scalers:", list(scalers.keys()))
+
+    print("K values:", list(K_VALUES))
+
+    expected = (
+        len(feature_spaces)
+        * len(scalers)
+        * len(K_VALUES)
+    )
+
+    print("Expected experiments:", expected)
 
     return feature_spaces, scalers
 
 
-# ==========================================
-# 3. EVALUATION METRICS
-# ==========================================
+# ============================================================
+# 7. EVALUATION METRICS
+# ============================================================
 
 def calculate_metrics(X, labels):
 
     unique_labels = np.unique(labels)
 
     if len(unique_labels) < 2:
-        raise ValueError("Only one cluster was generated.")
+        raise ValueError(
+            "Only one cluster was generated."
+        )
 
-    return {
+    if len(unique_labels) >= len(X):
+        raise ValueError(
+            "Invalid clustering: number of clusters "
+            "must be smaller than number of samples."
+        )
 
-        "Silhouette_Score": silhouette_score(
-            X, labels
-        ),
+    metrics = {}
 
-        "Davies_Bouldin_Index": davies_bouldin_score(
-            X, labels
-        ),
+    for metric_name in CONFIG_METRICS:
 
-        "Calinski_Harabasz_Score": calinski_harabasz_score(
+        if metric_name not in METRIC_REGISTRY:
+            raise ValueError(
+                f"Unsupported evaluation metric: {metric_name}"
+            )
+
+        column_name, metric_function, _ = (
+            METRIC_REGISTRY[metric_name]
+        )
+
+        metrics[column_name] = metric_function(
             X, labels
         )
 
-    }
+    return metrics
 
 
-# ==========================================
-# 4. RUN EXPERIMENTS
-# ==========================================
+# ============================================================
+# 8. RUN EXPERIMENTS
+# ============================================================
 
 def run_experiments(df):
 
@@ -146,11 +292,23 @@ def run_experiments(df):
 
     for feature_name, features in feature_spaces.items():
 
+        missing_columns = [
+            feature for feature in features
+            if feature not in df.columns
+        ]
+
+        if missing_columns:
+            raise ValueError(
+                f"Missing features for {feature_name}: "
+                f"{missing_columns}"
+            )
+
         for scaler_name, scaler_class in scalers.items():
 
             print("\n--------------------------------")
 
             print("Feature Space:", feature_name)
+
             print("Scaler:", scaler_name)
 
             scaler = scaler_class()
@@ -166,7 +324,7 @@ def run_experiments(df):
                     max_iter=MAX_ITER,
                     tol=TOLERANCE,
                     random_state=RANDOM_STATE,
-                    init="k-means++"
+                    init=INITIALIZATION
                 )
 
                 labels = model.fit_predict(X)
@@ -187,7 +345,9 @@ def run_experiments(df):
 
                     "Iterations": model.n_iter_,
 
-                    "Actual_Clusters": len(np.unique(labels)),
+                    "Actual_Clusters": len(
+                        np.unique(labels)
+                    ),
 
                     **metrics
 
@@ -202,12 +362,29 @@ def run_experiments(df):
                     f"CH={metrics['Calinski_Harabasz_Score']:.4f}"
                 )
 
-    return pd.DataFrame(results)
+    results_df = pd.DataFrame(results)
+
+    expected_count = (
+        len(feature_spaces)
+        * len(scalers)
+        * len(K_VALUES)
+    )
+
+    if len(results_df) != expected_count:
+        raise RuntimeError(
+            f"Experiment count mismatch: "
+            f"expected {expected_count}, "
+            f"got {len(results_df)}."
+        )
+
+    print("\nTotal experiments completed:", len(results_df))
+
+    return results_df
 
 
-# ==========================================
-# 5. SAVE RESULTS
-# ==========================================
+# ============================================================
+# 9. SAVE RESULTS
+# ============================================================
 
 def save_results(results):
 
@@ -223,9 +400,9 @@ def save_results(results):
     print("\nResults saved:", output_path)
 
 
-# ==========================================
-# 6. PLOT COMPARISON
-# ==========================================
+# ============================================================
+# 10. PLOT COMPARISON
+# ============================================================
 
 def plot_comparison(results, metric, title, filename):
 
@@ -273,37 +450,43 @@ def plot_comparison(results, metric, title, filename):
     print("Figure saved:", output_path)
 
 
-# ==========================================
-# 7. BEST CONFIGURATION
-# ==========================================
+# ============================================================
+# 11. SUMMARIZE BEST CONFIGURATIONS
+# ============================================================
 
 def summarize_results(results):
 
     print("\n========== BEST CONFIGURATIONS ==========")
 
-    metrics = {
+    if results.empty:
+        raise ValueError(
+            "No experiment results available."
+        )
 
-        "Silhouette_Score": "max",
+    for metric_name in CONFIG_METRICS:
 
-        "Davies_Bouldin_Index": "min",
+        column_name, _, direction = (
+            METRIC_REGISTRY[metric_name]
+        )
 
-        "Calinski_Harabasz_Score": "max"
-
-    }
-
-    for metric, direction in metrics.items():
+        if column_name not in results.columns:
+            raise KeyError(
+                f"Metric column not found: {column_name}"
+            )
 
         if direction == "max":
+
             best = results.loc[
-                results[metric].idxmax()
+                results[column_name].idxmax()
             ]
 
         else:
+
             best = results.loc[
-                results[metric].idxmin()
+                results[column_name].idxmin()
             ]
 
-        print(f"\nMetric: {metric}")
+        print(f"\nMetric: {column_name}")
 
         print("Feature Space:", best["Feature_Space"])
 
@@ -311,12 +494,12 @@ def summarize_results(results):
 
         print("K:", int(best["K"]))
 
-        print("Score:", round(best[metric], 4))
+        print("Score:", round(best[column_name], 4))
 
 
-# ==========================================
-# 8. MAIN
-# ==========================================
+# ============================================================
+# 12. MAIN
+# ============================================================
 
 def main():
 

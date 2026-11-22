@@ -40,4 +40,10 @@ progress_results/RUN_*/
 # Cache va du lieu tam
 .ipython/
 .coverage
-htmlcov/
+htmlcov/# Generated report artifacts
+/reports/report_REPORT_*.md
+/reports/report_REPORT_*.html
+/reports/report_REPORT_*.pdf
+
+# Local backup files
+/config.yaml.backup

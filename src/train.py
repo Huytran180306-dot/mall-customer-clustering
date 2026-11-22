@@ -1,3 +1,14 @@
+"""
+K-Means training module for Mall Customer Clustering.
+
+Responsibilities:
+1. Load standardized customer data.
+2. Train custom K-Means for K values from configuration.
+3. Record inertia and iteration counts.
+4. Save Elbow Method results.
+5. Generate the Elbow Method visualization.
+"""
+
 import sys
 from pathlib import Path
 
@@ -5,44 +16,86 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 
-# Import custom K-Means
-ROOT_DIR = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT_DIR))
 
+# ============================================================
+# 1. PROJECT CONFIGURATION
+# ============================================================
+
+ROOT_DIR = Path(__file__).resolve().parent.parent
+
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
+
+from src.config import get_config, get_path
 from src.models.kmeans import KMeans
 
 
-# ==========================================
-# CONFIGURATION
-# ==========================================
+# ============================================================
+# 2. CENTRALIZED CONFIGURATION
+# ============================================================
 
-DATA_PATH = ROOT_DIR / "data/processed/Mall_Customers_StandardScaler.csv"
-
-FIGURE_DIR = (
-    ROOT_DIR
-    / "reports/figures/customer_segmentation/02_training"
+DATA_PATH = (
+    get_path("data", "processed_dir")
+    / "Mall_Customers_StandardScaler.csv"
 )
 
-RESULT_DIR = ROOT_DIR / "progress_results"
+RESULT_DIR = get_path("paths", "progress")
 
-RANDOM_STATE = 42
-MAX_ITER = 300
-TOLERANCE = 0.0001
+FIGURE_DIR = (
+    get_path("paths", "figures")
+    / "02_training"
+)
 
-K_VALUES = range(2, 11)
+K_VALUES = get_config("experiments", "k_values")
+
+RANDOM_STATE = get_config(
+    "model", "random_state", default=42
+)
+
+MAX_ITER = get_config(
+    "model", "max_iterations", default=300
+)
+
+TOLERANCE = get_config(
+    "model", "tolerance", default=0.0001
+)
+
+INITIALIZATION = get_config(
+    "model", "initialization", default="k-means++"
+)
 
 
-# ==========================================
-# PREPARE DIRECTORIES
-# ==========================================
+# ============================================================
+# 3. VALIDATE CONFIGURATION
+# ============================================================
 
-FIGURE_DIR.mkdir(parents=True, exist_ok=True)
+if not K_VALUES:
+    raise ValueError(
+        "K values are missing in config.yaml."
+    )
+
+if any(not isinstance(k, int) or k < 2 for k in K_VALUES):
+    raise ValueError(
+        "All K values must be integers greater than or equal to 2."
+    )
+
+if len(set(K_VALUES)) != len(K_VALUES):
+    raise ValueError(
+        "Duplicate K values detected in config.yaml."
+    )
+
+
+# ============================================================
+# 4. PREPARE DIRECTORIES
+# ============================================================
+
 RESULT_DIR.mkdir(parents=True, exist_ok=True)
+FIGURE_DIR.mkdir(parents=True, exist_ok=True)
 
 
-# ==========================================
-# LOAD DATA
-# ==========================================
+# ============================================================
+# 5. LOAD DATA
+# ============================================================
 
 def load_data():
 
@@ -55,6 +108,11 @@ def load_data():
 
     df = pd.read_csv(DATA_PATH)
 
+    if df.empty:
+        raise ValueError(
+            "Training dataset is empty."
+        )
+
     X = df.to_numpy(dtype=float)
 
     if not np.isfinite(X).all():
@@ -64,12 +122,14 @@ def load_data():
 
     print("Dataset shape:", X.shape)
 
+    print("Features:", df.columns.tolist())
+
     return X
 
 
-# ==========================================
-# TRAIN DIFFERENT K VALUES
-# ==========================================
+# ============================================================
+# 6. TRAIN DIFFERENT K VALUES
+# ============================================================
 
 def run_kmeans_experiments(X):
 
@@ -86,26 +146,38 @@ def run_kmeans_experiments(X):
             max_iter=MAX_ITER,
             tol=TOLERANCE,
             random_state=RANDOM_STATE,
-            init="k-means++"
+            init=INITIALIZATION
         )
 
         model.fit(X)
 
         results.append({
+
             "K": k,
+
             "Inertia": model.inertia_,
+
             "Iterations": model.n_iter_
+
         })
 
         print("Inertia:", model.inertia_)
+
         print("Iterations:", model.n_iter_)
 
-    return pd.DataFrame(results)
+    results_df = pd.DataFrame(results)
+
+    if len(results_df) != len(K_VALUES):
+        raise RuntimeError(
+            "K-Means training experiment count mismatch."
+        )
+
+    return results_df
 
 
-# ==========================================
-# SAVE EXPERIMENT RESULTS
-# ==========================================
+# ============================================================
+# 7. SAVE EXPERIMENT RESULTS
+# ============================================================
 
 def save_results(results):
 
@@ -121,9 +193,9 @@ def save_results(results):
     print("\nResults saved:", output_path)
 
 
-# ==========================================
-# ELBOW METHOD
-# ==========================================
+# ============================================================
+# 8. ELBOW METHOD
+# ============================================================
 
 def plot_elbow(results):
 
@@ -162,15 +234,25 @@ def plot_elbow(results):
     print("\nElbow plot saved:", output_path)
 
 
-# ==========================================
-# MAIN
-# ==========================================
+# ============================================================
+# 9. MAIN
+# ============================================================
 
 def main():
 
     print("\n================================")
+
     print("MALL CUSTOMER K-MEANS TRAINING")
+
     print("================================")
+
+    print("K values:", list(K_VALUES))
+
+    print("Random state:", RANDOM_STATE)
+
+    print("Max iterations:", MAX_ITER)
+
+    print("Tolerance:", TOLERANCE)
 
     X = load_data()
 
@@ -185,7 +267,9 @@ def main():
     plot_elbow(results)
 
     print("\n================================")
+
     print("TRAINING EXPERIMENTS COMPLETED!")
+
     print("================================")
 
     print(

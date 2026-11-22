@@ -16,9 +16,10 @@ from reportlab.platypus import (
     Spacer,
     Table,
     TableStyle,
-    PageBreak,
     Image
 )
+
+from src.config import get_config, get_path
 
 
 # ==========================================
@@ -27,27 +28,33 @@ from reportlab.platypus import (
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
 
-REPORT_DIR = ROOT_DIR / "reports"
+REPORT_DIR = get_path("paths", "reports")
+DATA_PATH = get_path("data", "raw_path")
+RESULT_DIR = get_path("paths", "progress")
 
-DATA_PATH = ROOT_DIR / "data/raw/Mall_Customers.csv"
+FIGURE_DIR = get_path("paths", "figures")
 
-RESULT_DIR = ROOT_DIR / "progress_results"
+DOCS_DIR = get_path("paths", "docs")
 
-FIGURE_DIR = (
-    REPORT_DIR
-    / "figures/customer_segmentation"
+FIGURE_CATALOG = DOCS_DIR / "images" / "figure_catalog.csv"
+
+EXPERIMENT_LOG = DOCS_DIR / "experiment_logs.csv"
+
+
+# Behavior analysis configuration
+PROFILE_A_CONFIG = get_config(
+    "behavior_analysis",
+    default={}
 )
 
-FIGURE_CATALOG = (
-    ROOT_DIR
-    / "docs/images/figure_catalog.csv"
+# Final model configuration
+PROFILE_B_CONFIG = get_config(
+    "final_model",
+    default={}
 )
 
-EXPERIMENT_LOG = (
-    ROOT_DIR
-    / "docs/experiment_logs.csv"
-)
 
+# Report metadata
 REPORT_ID = datetime.now().strftime(
     "REPORT_%Y%m%d_%H%M%S"
 )
@@ -64,13 +71,113 @@ PDF_PATH = REPORT_DIR / f"report_{REPORT_ID}.pdf"
 
 
 # ==========================================
+# CONFIGURATION HELPERS
+# ==========================================
+
+def build_profile_path(config, config_name):
+
+    feature_space = config.get("feature_space")
+    scaler = config.get("scaler")
+    n_clusters = config.get("n_clusters")
+
+    required_values = {
+        "feature_space": feature_space,
+        "scaler": scaler,
+        "n_clusters": n_clusters
+    }
+
+    missing = [
+        key
+        for key, value in required_values.items()
+        if value is None
+    ]
+
+    if missing:
+        raise ValueError(
+            f"Missing configuration for {config_name}: {missing}"
+        )
+
+    scaler_mapping = {
+        "StandardScaler": "standard",
+        "MinMaxScaler": "minmax"
+    }
+
+    if scaler not in scaler_mapping:
+        raise ValueError(
+            f"Unsupported scaler in {config_name}: {scaler}"
+        )
+
+    scaler_name = scaler_mapping[scaler]
+
+    filename = (
+        f"{feature_space}_"
+        f"{scaler_name}_"
+        f"k{n_clusters}_profile.csv"
+    )
+
+    return RESULT_DIR / filename
+
+
+def describe_configuration(config):
+
+    feature_space = config.get(
+        "feature_space",
+        "unknown"
+    )
+
+    scaler = config.get(
+        "scaler",
+        "unknown"
+    )
+
+    n_clusters = config.get(
+        "n_clusters",
+        "unknown"
+    )
+
+    if feature_space == "with_gender":
+        feature_label = "With Gender"
+
+    elif feature_space == "without_gender":
+        feature_label = "Without Gender"
+
+    else:
+        feature_label = feature_space.replace(
+            "_",
+            " "
+        ).title()
+
+    return (
+        f"{feature_label}, "
+        f"{scaler}, "
+        f"K={n_clusters}"
+    )
+
+
+PROFILE_A_PATH = build_profile_path(
+    PROFILE_A_CONFIG,
+    "behavior_analysis"
+)
+
+PROFILE_B_PATH = build_profile_path(
+    PROFILE_B_CONFIG,
+    "final_model"
+)
+
+
+# ==========================================
 # 1. LOAD PROJECT DATA
 # ==========================================
 
 def load_csv(path):
 
     if not path.exists():
-        print("Warning: File not found:", path)
+
+        print(
+            "Warning: File not found:",
+            path
+        )
+
         return None
 
     return pd.read_csv(path)
@@ -96,15 +203,9 @@ def load_project_data():
             RESULT_DIR / "feature_scaling_experiments.csv"
         ),
 
-        "profile_a": load_csv(
-            RESULT_DIR
-            / "without_gender_standard_k6_profile.csv"
-        ),
+        "profile_a": load_csv(PROFILE_A_PATH),
 
-        "profile_b": load_csv(
-            RESULT_DIR
-            / "with_gender_minmax_k2_profile.csv"
-        ),
+        "profile_b": load_csv(PROFILE_B_PATH),
 
         "figure_catalog": load_csv(
             FIGURE_CATALOG
@@ -119,7 +220,10 @@ def load_project_data():
     for name, df in data.items():
 
         if df is not None:
-            print(f"{name}: {df.shape}")
+
+            print(
+                f"{name}: {df.shape}"
+            )
 
     return data
 
@@ -131,6 +235,7 @@ def load_project_data():
 def dataset_summary(df):
 
     if df is None:
+
         return "Dataset information is unavailable."
 
     lines = [
@@ -159,6 +264,7 @@ def dataset_summary(df):
 def dataframe_to_markdown(df, max_rows=20):
 
     if df is None or df.empty:
+
         return "No data available.\n"
 
     display_df = df.head(max_rows).copy()
@@ -170,9 +276,8 @@ def dataframe_to_markdown(df, max_rows=20):
             display_df[col] = display_df[col].map(
                 lambda x: (
                     f"{x:.4f}"
-                    if pd.notna(x) and isinstance(
-                        x, (float, int)
-                    )
+                    if pd.notna(x)
+                    and isinstance(x, (float, int))
                     else x
                 )
             )
@@ -216,18 +321,22 @@ def dataframe_to_markdown(df, max_rows=20):
 def summarize_experiments(df):
 
     if df is None or df.empty:
+
         return None
 
     required = [
+
         "Feature_Space",
         "Scaler",
         "K",
         "Silhouette_Score",
         "Davies_Bouldin_Index",
         "Calinski_Harabasz_Score"
+
     ]
 
     if not all(col in df.columns for col in required):
+
         return None
 
     records = []
@@ -344,7 +453,9 @@ def build_markdown(data):
     )
 
     # Experiments
-    report.append("\n## 5. Feature Space and Scaling Experiments\n")
+    report.append(
+        "\n## 5. Feature Space and Scaling Experiments\n"
+    )
 
     experiment_summary = summarize_experiments(
         data["experiments"]
@@ -358,7 +469,8 @@ def build_markdown(data):
     report.append("\n## 6. Customer Cluster Profiles\n")
 
     report.append(
-        "### Configuration A: Without Gender, StandardScaler, K=6\n"
+        f"### Configuration A: "
+        f"{describe_configuration(PROFILE_A_CONFIG)}\n"
     )
 
     report.append(
@@ -366,7 +478,8 @@ def build_markdown(data):
     )
 
     report.append(
-        "\n### Configuration B: With Gender, MinMaxScaler, K=2\n"
+        f"\n### Configuration B: "
+        f"{describe_configuration(PROFILE_B_CONFIG)}\n"
     )
 
     report.append(
@@ -463,10 +576,12 @@ def markdown_to_html(markdown_text):
         if not line:
 
             if inside_list:
+
                 output.append("</ul>")
                 inside_list = False
 
             index += 1
+
             continue
 
         # Markdown tables
@@ -490,14 +605,17 @@ def markdown_to_html(markdown_text):
             for row_index, row in enumerate(table_lines):
 
                 cells = [
+
                     cell.strip()
                     for cell in row.strip("|").split("|")
+
                 ]
 
                 if all(
                     set(cell) <= {"-", ":", " "}
                     for cell in cells
                 ):
+
                     continue
 
                 tag = "th" if row_index == 0 else "td"
@@ -516,9 +634,11 @@ def markdown_to_html(markdown_text):
 
             continue
 
+        # Headings
         if line.startswith("#"):
 
             if inside_list:
+
                 output.append("</ul>")
                 inside_list = False
 
@@ -532,9 +652,11 @@ def markdown_to_html(markdown_text):
                 f"<h{level}>{inline_format(title)}</h{level}>"
             )
 
+        # Lists
         elif line.startswith("- "):
 
             if not inside_list:
+
                 output.append("<ul>")
                 inside_list = True
 
@@ -542,6 +664,7 @@ def markdown_to_html(markdown_text):
                 f"<li>{inline_format(line[2:])}</li>"
             )
 
+        # Horizontal line
         elif line == "---":
 
             output.append("<hr>")
@@ -549,6 +672,7 @@ def markdown_to_html(markdown_text):
         else:
 
             if inside_list:
+
                 output.append("</ul>")
                 inside_list = False
 
@@ -559,6 +683,7 @@ def markdown_to_html(markdown_text):
         index += 1
 
     if inside_list:
+
         output.append("</ul>")
 
     body = "\n".join(output)
@@ -568,7 +693,6 @@ def markdown_to_html(markdown_text):
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-
 <title>Mall Customer Segmentation Report</title>
 
 <style>
@@ -619,11 +743,8 @@ hr {{
 </style>
 
 </head>
-
 <body>
-
 {body}
-
 </body>
 </html>
 """
@@ -638,12 +759,17 @@ def build_pdf(markdown_text, data):
     print("\n========== GENERATING PDF ==========")
 
     document = SimpleDocTemplate(
+
         str(PDF_PATH),
+
         pagesize=A4,
+
         rightMargin=1.5 * cm,
         leftMargin=1.5 * cm,
+
         topMargin=1.5 * cm,
         bottomMargin=1.5 * cm
+
     )
 
     styles = getSampleStyleSheet()
@@ -678,6 +804,7 @@ def build_pdf(markdown_text, data):
 
     story = []
 
+    # Report title
     story.append(
         Paragraph(
             "MALL CUSTOMER SEGMENTATION REPORT",
@@ -699,7 +826,13 @@ def build_pdf(markdown_text, data):
         )
     )
 
-    story.append(Spacer(1, 15))
+    story.append(
+        Spacer(1, 15)
+    )
+
+    # --------------------------------------
+    # PDF helper functions
+    # --------------------------------------
 
     def add_heading(title):
 
@@ -713,6 +846,7 @@ def build_pdf(markdown_text, data):
     def add_table(title, df, max_rows=20):
 
         if df is None or df.empty:
+
             return
 
         add_heading(title)
@@ -722,11 +856,14 @@ def build_pdf(markdown_text, data):
         table_data = [
 
             [
+
                 Paragraph(
                     html.escape(str(col)),
                     cell_style
                 )
+
                 for col in display_df.columns
+
             ]
 
         ]
@@ -736,11 +873,14 @@ def build_pdf(markdown_text, data):
             table_data.append(
 
                 [
+
                     Paragraph(
                         html.escape(str(value)),
                         cell_style
                     )
+
                     for value in row
+
                 ]
 
             )
@@ -748,12 +888,17 @@ def build_pdf(markdown_text, data):
         column_width = 18 * cm / len(display_df.columns)
 
         table = Table(
+
             table_data,
+
             colWidths=[
                 column_width
             ] * len(display_df.columns),
+
             repeatRows=1,
+
             hAlign="LEFT"
+
         )
 
         table.setStyle(
@@ -821,9 +966,14 @@ def build_pdf(markdown_text, data):
 
         story.append(table)
 
-        story.append(Spacer(1, 10))
+        story.append(
+            Spacer(1, 10)
+        )
 
-    # Dataset
+    # --------------------------------------
+    # 1. Dataset
+    # --------------------------------------
+
     add_heading("1. Dataset Overview")
 
     if data["raw"] is not None:
@@ -850,27 +1000,41 @@ def build_pdf(markdown_text, data):
 
         ]
 
-        story.append(Table(info))
+        story.append(
+            Table(info)
+        )
 
-    # Elbow
+    # --------------------------------------
+    # 2. Elbow
+    # --------------------------------------
+
     add_table(
         "2. Elbow Method",
         data["elbow"]
     )
 
-    # Evaluation
+    # --------------------------------------
+    # 3. Evaluation
+    # --------------------------------------
+
     add_table(
         "3. Clustering Evaluation",
         data["evaluation"]
     )
 
-    # Experiments
+    # --------------------------------------
+    # 4. Experiments
+    # --------------------------------------
+
     add_table(
         "4. Feature and Scaling Experiments",
         summarize_experiments(data["experiments"])
     )
 
-    # Profiles
+    # --------------------------------------
+    # 5. Profiles
+    # --------------------------------------
+
     add_table(
         "5. Configuration A - Cluster Profiles",
         data["profile_a"]
@@ -881,13 +1045,19 @@ def build_pdf(markdown_text, data):
         data["profile_b"]
     )
 
-    # Tracking
+    # --------------------------------------
+    # 7. Tracking
+    # --------------------------------------
+
     add_table(
         "7. Experiment Tracking",
         data["tracking"]
     )
 
-    # Figures
+    # --------------------------------------
+    # 8. Figures
+    # --------------------------------------
+
     add_heading("8. Visualization Gallery")
 
     catalog = data["figure_catalog"]
@@ -900,6 +1070,9 @@ def build_pdf(markdown_text, data):
                 "Relative_Path",
                 ""
             )
+
+            if not isinstance(relative_path, str):
+                continue
 
             image_path = ROOT_DIR / relative_path
 
@@ -917,7 +1090,9 @@ def build_pdf(markdown_text, data):
                     )
                 )
 
-                image = Image(str(image_path))
+                image = Image(
+                    str(image_path)
+                )
 
                 ratio = min(
                     (17 * cm) / image.imageWidth,
@@ -930,7 +1105,9 @@ def build_pdf(markdown_text, data):
 
                 story.append(image)
 
-                story.append(Spacer(1, 12))
+                story.append(
+                    Spacer(1, 12)
+                )
 
     document.build(story)
 
@@ -978,10 +1155,14 @@ def export_reports(data):
 def main():
 
     print("\n========================================")
-
     print("MALL CUSTOMER REPORT GENERATOR")
-
     print("========================================")
+
+    print("Report directory:", REPORT_DIR)
+
+    print("Dataset:", DATA_PATH)
+
+    print("Results directory:", RESULT_DIR)
 
     REPORT_DIR.mkdir(
         parents=True,
@@ -991,6 +1172,7 @@ def main():
     data = load_project_data()
 
     if data["raw"] is None:
+
         raise FileNotFoundError(
             "Raw dataset is required."
         )
@@ -998,9 +1180,7 @@ def main():
     export_reports(data)
 
     print("\n========================================")
-
     print("REPORT GENERATION COMPLETED SUCCESSFULLY!")
-
     print("========================================")
 
 

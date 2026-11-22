@@ -1,92 +1,262 @@
+"""
+Customer cluster analysis module.
+
+Responsibilities:
+1. Load raw customer data.
+2. Read behavioral-analysis and final-model configurations.
+3. Generate customer cluster profiles.
+4. Analyze gender distribution.
+5. Save customer assignments and cluster summaries.
+"""
+
 import sys
 from pathlib import Path
 
 import pandas as pd
 from sklearn.preprocessing import StandardScaler, MinMaxScaler
 
-ROOT_DIR = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT_DIR))
 
+# ============================================================
+# 1. PROJECT CONFIGURATION
+# ============================================================
+
+ROOT_DIR = Path(__file__).resolve().parent.parent
+
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
+
+from src.config import get_config, get_path
 from src.models.kmeans import KMeans
 
 
-# ==========================================
-# CONFIGURATION
-# ==========================================
+# ============================================================
+# 2. CENTRALIZED CONFIGURATION
+# ============================================================
 
-DATA_PATH = ROOT_DIR / "data/raw/Mall_Customers.csv"
+DATA_PATH = get_path("data", "raw_path")
+RESULT_DIR = get_path("paths", "progress")
 
-RESULT_DIR = ROOT_DIR / "progress_results"
+FEATURE_SPACES = get_config(
+    "experiments", "feature_spaces"
+)
+
+GENDER_MAPPING = get_config(
+    "preprocessing", "encoding", "mapping"
+)
+
+MODEL_DEFAULTS = get_config("model")
+
+SCALER_CLASSES = {
+    "StandardScaler": StandardScaler,
+    "MinMaxScaler": MinMaxScaler
+}
 
 RESULT_DIR.mkdir(parents=True, exist_ok=True)
 
 
-# ==========================================
-# LOAD DATA
-# ==========================================
+# ============================================================
+# 3. LOAD DATA
+# ============================================================
 
 def load_data():
 
+    print("\n========== LOADING RAW DATA ==========")
+
+    if not DATA_PATH.exists():
+        raise FileNotFoundError(
+            f"Dataset not found: {DATA_PATH}"
+        )
+
     df = pd.read_csv(DATA_PATH)
 
-    df = df.drop_duplicates().dropna().copy()
+    if get_config(
+        "preprocessing",
+        "drop_duplicates",
+        default=True
+    ):
+        df = df.drop_duplicates()
+
+    if get_config(
+        "preprocessing",
+        "handle_missing_values",
+        default=True
+    ):
+        df = df.dropna()
+
+    df = df.copy()
+
+    required_columns = [
+        "CustomerID",
+        "Gender",
+        "Age",
+        "Annual Income (k$)",
+        "Spending Score (1-100)"
+    ]
+
+    missing_columns = [
+        column for column in required_columns
+        if column not in df.columns
+    ]
+
+    if missing_columns:
+        raise ValueError(
+            f"Missing required columns: {missing_columns}"
+        )
+
+    print("Dataset shape:", df.shape)
 
     return df
 
 
-# ==========================================
-# ANALYZE CLUSTER PROFILES
-# ==========================================
+# ============================================================
+# 4. PREPARE FEATURE DATA
+# ============================================================
+
+def prepare_features(df, feature_space):
+
+    if feature_space not in FEATURE_SPACES:
+        raise ValueError(
+            f"Unknown feature space: {feature_space}"
+        )
+
+    features = FEATURE_SPACES[feature_space]
+
+    missing_columns = [
+        column for column in features
+        if column not in df.columns
+    ]
+
+    if missing_columns:
+        raise ValueError(
+            f"Missing features: {missing_columns}"
+        )
+
+    X = df[features].copy()
+
+    if "Gender" in features:
+
+        gender_values = (
+            X["Gender"].astype(str).str.strip()
+        )
+
+        encoded = gender_values.map(GENDER_MAPPING)
+
+        if encoded.isna().any():
+            unknown_values = (
+                gender_values[encoded.isna()]
+                .unique()
+                .tolist()
+            )
+
+            raise ValueError(
+                f"Unknown Gender values: {unknown_values}"
+            )
+
+        X["Gender"] = encoded.astype(int)
+
+    return X
+
+
+# ============================================================
+# 5. ANALYZE CLUSTER CONFIGURATION
+# ============================================================
 
 def analyze_configuration(
     df,
     configuration_name,
-    features,
-    scaler,
-    n_clusters
+    configuration
 ):
 
-    X = df[features].copy()
+    print("\n========================================")
 
-    X["Gender"] = X["Gender"].map({
-        "Male": 0,
-        "Female": 1
-    }) if "Gender" in X.columns else None
+    print("CONFIGURATION:", configuration_name)
 
-    X = X.drop(
-        columns=["Gender"],
-        errors="ignore"
-    ) if "Gender" not in features else X
+    print("========================================")
 
-    if "Gender" in features:
-        X["Gender"] = df["Gender"].map({
-            "Male": 0,
-            "Female": 1
-        })
+    # Read configuration
+    feature_space = configuration["feature_space"]
+
+    scaler_name = configuration["scaler"]
+
+    n_clusters = int(configuration["n_clusters"])
+
+    max_iter = int(
+        configuration.get(
+            "max_iterations",
+            MODEL_DEFAULTS["max_iterations"]
+        )
+    )
+
+    tolerance = float(
+        configuration.get(
+            "tolerance",
+            MODEL_DEFAULTS["tolerance"]
+        )
+    )
+
+    random_state = int(
+        configuration.get(
+            "random_state",
+            MODEL_DEFAULTS["random_state"]
+        )
+    )
+
+    initialization = configuration.get(
+        "initialization",
+        MODEL_DEFAULTS["initialization"]
+    )
+
+    # Validate scaler
+    if scaler_name not in SCALER_CLASSES:
+        raise ValueError(
+            f"Unsupported scaler: {scaler_name}"
+        )
+
+    # Prepare features
+    X = prepare_features(df, feature_space)
+
+    print("Feature space:", feature_space)
+    print("Features:", X.columns.tolist())
+    print("Scaler:", scaler_name)
+    print("K:", n_clusters)
+
+    # Scaling
+    scaler = SCALER_CLASSES[scaler_name]()
 
     scaled_data = scaler.fit_transform(X)
 
+    # K-Means
     model = KMeans(
         n_clusters=n_clusters,
-        max_iter=300,
-        random_state=42,
-        init="k-means++"
+        max_iter=max_iter,
+        tol=tolerance,
+        random_state=random_state,
+        init=initialization
     )
 
     labels = model.fit_predict(scaled_data)
 
+    # Attach cluster labels to original data
     result = df.copy()
 
     result["Cluster"] = labels
 
+    # --------------------------------------------------------
     # Cluster sizes
+    # --------------------------------------------------------
+
     print("\n========== CLUSTER SIZES ==========")
 
     print(
-        result["Cluster"].value_counts().sort_index()
+        result["Cluster"]
+        .value_counts()
+        .sort_index()
     )
 
+    # --------------------------------------------------------
     # Cluster profiles
+    # --------------------------------------------------------
+
     profile = result.groupby("Cluster").agg(
         Customers=("CustomerID", "count"),
         Average_Age=("Age", "mean"),
@@ -98,7 +268,10 @@ def analyze_configuration(
 
     print(profile)
 
+    # --------------------------------------------------------
     # Gender distribution
+    # --------------------------------------------------------
+
     gender_profile = pd.crosstab(
         result["Cluster"],
         result["Gender"],
@@ -109,73 +282,94 @@ def analyze_configuration(
 
     print(gender_profile)
 
+    # --------------------------------------------------------
     # Save results
-    profile.to_csv(
-        RESULT_DIR / f"{configuration_name}_profile.csv"
+    # --------------------------------------------------------
+
+    profile_path = (
+        RESULT_DIR
+        / f"{configuration_name}_profile.csv"
     )
 
-    gender_profile.to_csv(
-        RESULT_DIR / f"{configuration_name}_gender.csv"
+    gender_path = (
+        RESULT_DIR
+        / f"{configuration_name}_gender.csv"
     )
+
+    customers_path = (
+        RESULT_DIR
+        / f"{configuration_name}_customers.csv"
+    )
+
+    profile.to_csv(profile_path)
+
+    gender_profile.to_csv(gender_path)
 
     result.to_csv(
-        RESULT_DIR / f"{configuration_name}_customers.csv",
+        customers_path,
         index=False
     )
 
-    print("\nSaved configuration:", configuration_name)
+    print("\n========== FILES SAVED ==========")
+
+    print("Profile:", profile_path)
+
+    print("Gender:", gender_path)
+
+    print("Customers:", customers_path)
+
+    print("Iterations:", model.n_iter_)
+
+    print("Inertia:", round(model.inertia_, 4))
+
+    print("\nConfiguration completed:", configuration_name)
+
+    return profile, gender_profile, result
 
 
-# ==========================================
-# MAIN
-# ==========================================
+# ============================================================
+# 6. MAIN
+# ============================================================
 
 def main():
 
-    print("\n================================")
+    print("\n========================================")
 
     print("CUSTOMER CLUSTER PROFILE ANALYSIS")
 
-    print("================================")
+    print("========================================")
 
     df = load_data()
 
-    # Configuration A:
-    # Without Gender + StandardScaler + K=6
+    configurations = [
+        (
+            "without_gender_standard_k6",
+            get_config("behavior_analysis")
+        ),
+        (
+            "with_gender_minmax_k2",
+            get_config("final_model")
+        )
+    ]
 
-    analyze_configuration(
-        df,
-        "without_gender_standard_k6",
-        [
-            "Age",
-            "Annual Income (k$)",
-            "Spending Score (1-100)"
-        ],
-        StandardScaler(),
-        6
-    )
+    for configuration_name, configuration in configurations:
 
-    # Configuration B:
-    # With Gender + MinMaxScaler + K=2
+        if not isinstance(configuration, dict):
+            raise ValueError(
+                f"Invalid configuration: {configuration_name}"
+            )
 
-    analyze_configuration(
-        df,
-        "with_gender_minmax_k2",
-        [
-            "Gender",
-            "Age",
-            "Annual Income (k$)",
-            "Spending Score (1-100)"
-        ],
-        MinMaxScaler(),
-        2
-    )
+        analyze_configuration(
+            df,
+            configuration_name,
+            configuration
+        )
 
-    print("\n================================")
+    print("\n========================================")
 
     print("CLUSTER ANALYSIS COMPLETED!")
 
-    print("================================")
+    print("========================================")
 
 
 if __name__ == "__main__":

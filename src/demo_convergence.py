@@ -1,16 +1,13 @@
-import sys
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 
-from sklearn.preprocessing import StandardScaler
+from sklearn.preprocessing import StandardScaler, MinMaxScaler
 from sklearn.decomposition import PCA
 
-ROOT_DIR = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT_DIR))
-
+from src.config import get_config, get_path
 from src.models.kmeans import KMeans
 
 
@@ -18,23 +15,70 @@ from src.models.kmeans import KMeans
 # CONFIGURATION
 # ==========================================
 
-DATA_PATH = ROOT_DIR / "data/raw/Mall_Customers.csv"
+BEHAVIOR_CONFIG = get_config("behavior_analysis", default={})
+MODEL_CONFIG = get_config("model", default={})
 
-OUTPUT_DIR = (
-    ROOT_DIR
-    / "reports/figures/customer_segmentation/05_extended/convergence"
+FEATURE_SPACE_NAME = BEHAVIOR_CONFIG.get(
+    "feature_space",
+    "without_gender"
 )
 
-RESULT_DIR = ROOT_DIR / "progress_results"
+FEATURES = get_config(
+    "experiments",
+    "feature_spaces",
+    FEATURE_SPACE_NAME
+)
 
-FEATURES = [
-    "Age",
-    "Annual Income (k$)",
-    "Spending Score (1-100)"
-]
+if not FEATURES:
+    raise ValueError(
+        f"Feature space '{FEATURE_SPACE_NAME}' not found in config.yaml"
+    )
 
-K = 6
-RANDOM_STATE = 42
+SCALER_NAME = BEHAVIOR_CONFIG.get(
+    "scaler",
+    "StandardScaler"
+)
+
+SCALER_MAP = {
+    "StandardScaler": StandardScaler,
+    "MinMaxScaler": MinMaxScaler
+}
+
+if SCALER_NAME not in SCALER_MAP:
+    raise ValueError(
+        f"Unsupported scaler: {SCALER_NAME}"
+    )
+
+SCALER_CLASS = SCALER_MAP[SCALER_NAME]
+
+DATA_PATH = get_path("data", "raw_path")
+
+OUTPUT_DIR = (
+    get_path("paths", "figures")
+    / "05_extended"
+    / "convergence"
+)
+
+RESULT_DIR = get_path("paths", "progress")
+
+K = int(BEHAVIOR_CONFIG.get("n_clusters", 6))
+
+MAX_ITER = int(
+    MODEL_CONFIG.get("max_iterations", 300)
+)
+
+TOL = float(
+    MODEL_CONFIG.get("tolerance", 0.0001)
+)
+
+RANDOM_STATE = int(
+    MODEL_CONFIG.get("random_state", 42)
+)
+
+INITIALIZATION = MODEL_CONFIG.get(
+    "initialization",
+    "k-means++"
+)
 
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 RESULT_DIR.mkdir(parents=True, exist_ok=True)
@@ -55,6 +99,16 @@ def load_data():
 
     df = pd.read_csv(DATA_PATH)
 
+    missing_features = [
+        feature for feature in FEATURES
+        if feature not in df.columns
+    ]
+
+    if missing_features:
+        raise ValueError(
+            f"Missing features in dataset: {missing_features}"
+        )
+
     X = df[FEATURES].to_numpy(dtype=float)
 
     if not np.isfinite(X).all():
@@ -62,12 +116,13 @@ def load_data():
             "Dataset contains missing or infinite values."
         )
 
-    scaler = StandardScaler()
+    scaler = SCALER_CLASS()
 
     X_scaled = scaler.fit_transform(X)
 
     print("Dataset shape:", X_scaled.shape)
     print("Features:", FEATURES)
+    print("Scaler:", SCALER_NAME)
 
     return X_scaled
 
@@ -82,10 +137,10 @@ def train_model(X):
 
     model = KMeans(
         n_clusters=K,
-        max_iter=300,
-        tol=0.0001,
+        max_iter=MAX_ITER,
+        tol=TOL,
         random_state=RANDOM_STATE,
-        init="k-means++"
+        init=INITIALIZATION
     )
 
     model.fit(X)
@@ -214,6 +269,21 @@ def visualize_convergence(X, model):
 
 def save_centroid_history(model):
 
+    feature_column_map = {
+        "Age": "Age_Scaled",
+        "Annual Income (k$)": "Annual_Income_Scaled",
+        "Spending Score (1-100)": "Spending_Score_Scaled",
+        "Gender": "Gender_Scaled"
+    }
+
+    output_columns = [
+        feature_column_map.get(
+            feature,
+            f"{feature.replace(' ', '_')}_Scaled"
+        )
+        for feature in FEATURES
+    ]
+
     records = []
 
     for iteration, centroids in enumerate(
@@ -222,25 +292,32 @@ def save_centroid_history(model):
 
         for cluster_id, centroid in enumerate(centroids):
 
-            records.append({
-
+            record = {
                 "Iteration": iteration,
+                "Cluster": cluster_id
+            }
 
-                "Cluster": cluster_id,
+            for feature, value in zip(FEATURES, centroid):
 
-                "Age_Scaled": centroid[0],
+                column_name = feature_column_map.get(
+                    feature,
+                    f"{feature.replace(' ', '_')}_Scaled"
+                )
 
-                "Annual_Income_Scaled": centroid[1],
+                record[column_name] = value
 
-                "Spending_Score_Scaled": centroid[2]
+            records.append(record)
 
-            })
-
-    history_df = pd.DataFrame(records)
-
-    output_path = (
-        RESULT_DIR / "centroid_history.csv"
+    history_df = pd.DataFrame(
+        records,
+        columns=[
+            "Iteration",
+            "Cluster",
+            *output_columns
+        ]
     )
+
+    output_path = RESULT_DIR / "centroid_history.csv"
 
     history_df.to_csv(
         output_path,
@@ -257,10 +334,13 @@ def save_centroid_history(model):
 def main():
 
     print("\n========================================")
-
     print("K-MEANS CONVERGENCE DEMONSTRATION")
-
     print("========================================")
+
+    print("Feature space:", FEATURE_SPACE_NAME)
+    print("Features:", FEATURES)
+    print("Scaler:", SCALER_NAME)
+    print("K:", K)
 
     X = load_data()
 
@@ -271,9 +351,7 @@ def main():
     save_centroid_history(model)
 
     print("\n========================================")
-
     print("CONVERGENCE DEMO COMPLETED SUCCESSFULLY!")
-
     print("========================================")
 
 

@@ -1,35 +1,140 @@
+# ============================================================
+# MALL CUSTOMER CLUSTERING - CENTRAL CONFIGURATION
+# ============================================================
+
 project:
   name: Mall_Customer_Clustering
-  version: 1.0.0
+  version: 2.0.0
   random_state: 42
+
+
+# ============================================================
+# 1. DATA CONFIGURATION
+# ============================================================
 
 data:
   raw_path: data/raw/Mall_Customers.csv
-  processed_path: data/processed/
+  processed_dir: data/processed
 
-  target_features:
+  id_column: CustomerID
+
+  numeric_features:
     - Age
-    - Annual Income (k$)
-    - Spending Score (1-100)
+    - "Annual Income (k$)"
+    - "Spending Score (1-100)"
 
   categorical_features:
     - Gender
 
-  id_column: CustomerID
+  selected_features:
+    - Gender
+    - Age
+    - "Annual Income (k$)"
+    - "Spending Score (1-100)"
+
+
+# ============================================================
+# 2. PREPROCESSING CONFIGURATION
+# ============================================================
 
 preprocessing:
-  scaler: StandardScaler
-  encoding: OneHotEncoder
   handle_missing_values: true
+  drop_duplicates: true
+
+  encoding:
+    method: binary_mapping
+    mapping:
+      Male: 0
+      Female: 1
+
+  scalers:
+    - StandardScaler
+    - MinMaxScaler
+
+
+# ============================================================
+# 3. K-MEANS CONFIGURATION
+# ============================================================
 
 model:
   name: KMeans
   implementation: numpy
+  initialization: k-means++
 
-  n_clusters: 5
   max_iterations: 300
   tolerance: 0.0001
   random_state: 42
+
+
+# ============================================================
+# 4. EXPERIMENT CONFIGURATION - 36 EXPERIMENTS
+# ============================================================
+
+experiments:
+  k_values:
+    - 2
+    - 3
+    - 4
+    - 5
+    - 6
+    - 7
+    - 8
+    - 9
+    - 10
+
+  feature_spaces:
+    without_gender:
+      - Age
+      - "Annual Income (k$)"
+      - "Spending Score (1-100)"
+
+    with_gender:
+      - Gender
+      - Age
+      - "Annual Income (k$)"
+      - "Spending Score (1-100)"
+
+  scalers:
+    - StandardScaler
+    - MinMaxScaler
+
+  random_state: 42
+
+
+# ============================================================
+# 5. BEHAVIORAL ANALYSIS CONFIGURATION
+# ============================================================
+
+behavior_analysis:
+  enabled: true
+
+  feature_space: without_gender
+  scaler: StandardScaler
+
+  n_clusters: 6
+
+
+# ============================================================
+# 6. FINAL MODEL CONFIGURATION
+# ============================================================
+
+final_model:
+  name: KMeans
+
+  feature_space: with_gender
+  scaler: MinMaxScaler
+
+  n_clusters: 2
+  max_iterations: 300
+  tolerance: 0.0001
+  random_state: 42
+
+  initialization: k-means++
+
+
+# ============================================================
+# 7. MODEL EVALUATION
+# ============================================================
 
 evaluation:
   metrics:
@@ -37,13 +142,33 @@ evaluation:
     - davies_bouldin_score
     - calinski_harabasz_score
 
+  additional_metrics:
+    - inertia
+    - iterations
+
+
+# ============================================================
+# 8. EXPERIMENT TRACKING
+# ============================================================
+
 tracking:
   enabled: true
   run_id_format: "%Y%m%d_%H%M%S"
 
+
+# ============================================================
+# 9. PROJECT PATHS
+# ============================================================
+
 paths:
   models: models/
+  kmeans_models: models/kmeans/
+  preprocessing_models: models/preprocessing/
+
   logs: logs/
+
   reports: reports/
   figures: reports/figures/customer_segmentation/
+
   progress: progress_results/
+  docs: docs/
