@@ -1,3 +1,15 @@
+"""
+Experiment tracking module for Mall Customer Clustering.
+
+Responsibilities:
+1. Generate unique experiment run IDs.
+2. Create run directories.
+3. Record experiment history.
+4. Save metrics and metadata.
+5. Track experiment completion or failure.
+"""
+
+import sys
 import csv
 import json
 import uuid
@@ -6,17 +18,33 @@ from datetime import datetime
 from pathlib import Path
 
 
-# ==========================================
-# CONFIGURATION
-# ==========================================
+# ============================================================
+# 1. PROJECT CONFIGURATION
+# ============================================================
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
 
-DOCS_DIR = ROOT_DIR / "docs"
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
+
+from src.config import get_config, get_path
+
+
+# ============================================================
+# 2. CENTRALIZED PATHS AND CONFIGURATION
+# ============================================================
+
+DOCS_DIR = get_path("paths", "docs")
 
 LOG_FILE = DOCS_DIR / "experiment_logs.csv"
 
-PROGRESS_DIR = ROOT_DIR / "progress_results"
+PROGRESS_DIR = get_path("paths", "progress")
+
+RUN_ID_FORMAT = get_config(
+    "tracking",
+    "run_id_format",
+    default="%Y%m%d_%H%M%S"
+)
 
 RUN_FIELDS = [
     "run_id",
@@ -33,14 +61,14 @@ RUN_FIELDS = [
 ]
 
 
-# ==========================================
-# 1. GENERATE RUN ID
-# ==========================================
+# ============================================================
+# 3. GENERATE RUN ID
+# ============================================================
 
 def generate_run_id():
 
     timestamp = datetime.now().strftime(
-        "%Y%m%d_%H%M%S"
+        RUN_ID_FORMAT
     )
 
     unique_id = uuid.uuid4().hex[:6]
@@ -48,9 +76,9 @@ def generate_run_id():
     return f"RUN_{timestamp}_{unique_id}"
 
 
-# ==========================================
-# 2. CREATE RUN DIRECTORY
-# ==========================================
+# ============================================================
+# 4. CREATE RUN DIRECTORY
+# ============================================================
 
 def create_run_directory(run_id):
 
@@ -64,9 +92,9 @@ def create_run_directory(run_id):
     return run_dir
 
 
-# ==========================================
-# 3. APPEND EXPERIMENT LOG
-# ==========================================
+# ============================================================
+# 5. APPEND EXPERIMENT LOG
+# ============================================================
 
 def append_experiment_log(record):
 
@@ -100,15 +128,17 @@ def append_experiment_log(record):
         })
 
 
-# ==========================================
-# 4. CREATE NEW RUN
-# ==========================================
+# ============================================================
+# 6. CREATE NEW RUN
+# ============================================================
 
 def start_run(
     experiment_name,
     algorithm="KMeans (NumPy)",
     parameters=None
 ):
+
+    parameters = parameters or {}
 
     run_id = generate_run_id()
 
@@ -128,7 +158,7 @@ def start_run(
 
         "algorithm": algorithm,
 
-        "parameters": parameters or {},
+        "parameters": parameters,
 
         "status": "running"
 
@@ -161,15 +191,15 @@ def start_run(
         "algorithm": algorithm,
 
         "features": json.dumps(
-            (parameters or {}).get("features", []),
+            parameters.get("features", []),
             ensure_ascii=False
         ),
 
-        "n_clusters": (parameters or {}).get(
+        "n_clusters": parameters.get(
             "n_clusters", ""
         ),
 
-        "scaler": (parameters or {}).get(
+        "scaler": parameters.get(
             "scaler", ""
         ),
 
@@ -188,9 +218,9 @@ def start_run(
     return run_id, run_dir
 
 
-# ==========================================
-# 5. LOG METRICS
-# ==========================================
+# ============================================================
+# 7. LOG METRICS
+# ============================================================
 
 def log_metrics(run_id, metrics):
 
@@ -237,9 +267,9 @@ def log_metrics(run_id, metrics):
     print("Metrics saved:", metrics_path)
 
 
-# ==========================================
-# 6. FINISH RUN
-# ==========================================
+# ============================================================
+# 8. FINISH RUN
+# ============================================================
 
 def finish_run(
     run_id,
@@ -312,9 +342,9 @@ def finish_run(
     print("Notes:", notes)
 
 
-# ==========================================
-# 7. MAIN - TRACKING TEST
-# ==========================================
+# ============================================================
+# 9. MAIN - TRACKING TEST
+# ============================================================
 
 def main():
 
@@ -345,7 +375,6 @@ def main():
         parameters=parameters
     )
 
-    # Test metrics only: not an actual model evaluation
     log_metrics(
         run_id,
         {
@@ -356,7 +385,10 @@ def main():
     finish_run(
         run_id,
         status="success",
-        notes="Tracking system test completed. No model training executed."
+        notes=(
+            "Tracking system test completed. "
+            "No model training executed."
+        )
     )
 
     print("\n================================")

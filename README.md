@@ -1,389 +1,199 @@
-# DỰ ÁN PHÂN CỤM KHÁCH HÀNG TRUNG TÂM THƯƠNG MẠI
-## Mall Customer Clustering Using K-Means
+# Mall Customer Clustering
 
----
+Dự án phân tích và phân nhóm khách hàng trung tâm thương mại bằng thuật toán K-Means. Mục tiêu là tìm các nhóm khách hàng có đặc điểm gần nhau về tuổi, thu nhập và điểm chi tiêu, để việc mô tả hành vi khách hàng dễ hiểu hơn.
 
-## 1. Giới thiệu đề tài
+> README này mô tả cấu trúc và cấu hình hiện có trong repository. Cấu hình mô hình cuối được đọc từ `config.yaml`; kết quả huấn luyện được ghi trong `models/kmeans/model_metadata.json`.
 
-Dự án **Mall Customer Clustering** được thực hiện nhằm phân tích và phân nhóm khách hàng của một trung tâm thương mại dựa trên các đặc điểm cá nhân và hành vi chi tiêu.
+## Mục lục
 
-Dự án sử dụng thuật toán học máy không giám sát K-Means (K-Means Clustering) để tìm kiếm những nhóm khách hàng có đặc điểm tương đồng.
+- [Bài toán và dữ liệu](#bài-toán-và-dữ-liệu)
+- [Luồng hoạt động](#luồng-hoạt-động)
+- [Cấu hình mô hình hiện tại](#cấu-hình-mô-hình-hiện-tại)
+- [Cấu trúc thư mục](#cấu-trúc-thư-mục)
+- [Cài đặt](#cài-đặt)
+- [Cách sử dụng](#cách-sử-dụng)
+- [Kết quả và báo cáo](#kết-quả-và-báo-cáo)
+- [Kiểm thử](#kiểm-thử)
+- [Lưu ý khi đọc kết quả](#lưu-ý-khi-đọc-kết-quả)
 
-Thông qua việc phân cụm, doanh nghiệp có thể hiểu rõ hơn về đặc điểm của từng nhóm khách hàng, từ đó hỗ trợ xây dựng chiến lược tiếp thị, chăm sóc khách hàng và kinh doanh phù hợp.
+## Bài toán và dữ liệu
 
-## 2. Mục tiêu dự án
+Dữ liệu gốc nằm tại `data/raw/Mall_Customers.csv`. Bản dữ liệu hiện có gồm 200 khách hàng và các cột:
 
-Các mục tiêu chính:
+| Cột | Ý nghĩa | Dùng làm đặc trưng của mô hình cuối? |
+|---|---|---|
+| `CustomerID` | Mã định danh khách hàng | Không |
+| `Gender` | Giới tính | Không |
+| `Age` | Tuổi | Có |
+| `Annual Income (k$)` | Thu nhập hàng năm, đơn vị nghìn đô la | Có |
+| `Spending Score (1-100)` | Điểm chi tiêu từ 1 đến 100 | Có |
 
-- Phân tích tổng quan dữ liệu khách hàng.
-- Kiểm tra chất lượng và cấu trúc dữ liệu.
-- Tiền xử lý và chuẩn hóa dữ liệu.
-- Xây dựng thuật toán K-Means.
-- Xác định số cụm khách hàng phù hợp.
-- Đánh giá chất lượng kết quả phân cụm.
-- Phân tích đặc điểm của từng nhóm khách hàng.
-- Xây dựng mô hình K-Means hoàn chỉnh để dự đoán nhóm khách hàng mới.
-- Xây dựng quy trình thực thi tự động (Pipeline).
+`CustomerID` chỉ dùng để nhận diện, không phản ánh mức độ giống nhau giữa khách hàng. Cấu hình mô hình cuối cũng không đưa `Gender` vào tập đặc trưng.
 
-## 3. Bộ dữ liệu
+## Luồng hoạt động
 
-Dự án sử dụng bộ dữ liệu Mall Customers.
+```text
+config.yaml ── thiết lập đường dẫn, đặc trưng và tham số
+      │
+      ├── data/raw/Mall_Customers.csv
+      │       ├── src/eda.py ─────────────── khảo sát và biểu đồ dữ liệu
+      │       ├── src/preprocess.py ──────── làm sạch, mã hóa, chuẩn hóa
+      │       └── train/evaluate/experiments/cluster_analysis
+      │                                      huấn luyện và phân tích nhóm
+      │
+      └── src/pipeline.py ────────────────── điều phối toàn bộ các bước
+                                               │
+                 progress_results/, reports/, logs/, models/kmeans/
+                                               │
+                                    src/predict.py: nhóm khách mới
+```
 
-**Tên tệp dữ liệu:** `Mall_Customers.csv`
+Pipeline tự động chạy lần lượt: khảo sát dữ liệu, tiền xử lý, huấn luyện K-Means, đánh giá, thực nghiệm cấu hình, phân tích cụm, minh họa hội tụ, quản lý biểu đồ và tạo báo cáo. Các module đọc tham số tập trung qua `src/config.py` từ `config.yaml`.
 
-**Quy mô dữ liệu:**
-- Tổng số bản ghi: 200 khách hàng.
-- Tổng số thuộc tính: 5.
-- Dữ liệu gồm cả thuộc tính dạng số và dạng phân loại.
+### Vai trò từng module và mối liên hệ
 
-### Các thuộc tính trong bộ dữ liệu
+| Module | Chức năng | Liên hệ trong luồng |
+|---|---|---|
+| `config.py` | Đọc cấu hình và phân giải đường dẫn | Được các module khác dùng chung để tránh lặp tham số. |
+| `feature_processing.py` | Làm sạch bản ghi, chọn và kiểm tra đặc trưng, mã hóa giới tính | Huấn luyện, đánh giá, phân tích cụm và dự đoán dùng cùng cách chuẩn bị feature. |
+| `eda.py` | Kiểm tra dữ liệu, ngoại lệ và tạo biểu đồ khám phá | Đọc dữ liệu gốc; hình được đưa vào danh mục và báo cáo. |
+| `preprocess.py` | Làm sạch, mã hóa giới tính khi cần, chuẩn hóa dữ liệu | Chuẩn bị các bản CSV cho huấn luyện và thực nghiệm. |
+| `models/kmeans.py` | Cài đặt K-Means bằng NumPy | Được huấn luyện, đánh giá và dự đoán sử dụng. |
+| `train.py` | Thử nhiều K và tạo kết quả Elbow | Kết quả được `evaluate.py` và báo cáo sử dụng. |
+| `evaluate.py` | Tính Silhouette, Davies–Bouldin, Calinski–Harabasz | So sánh K để hỗ trợ chọn cấu hình. |
+| `experiments.py` | So sánh scaler và tập đặc trưng | Bổ sung bằng chứng về lựa chọn tiền xử lý. |
+| `train_final_model.py` | Huấn luyện cấu hình cuối, lưu model, scaler và metadata | Tạo đúng bộ artifacts mà `predict.py` nạp. |
+| `cluster_analysis.py` | Tạo hồ sơ và mô tả từng cụm | Dùng nhãn phân cụm để diễn giải nhóm khách hàng. |
+| `demo_convergence.py` | Minh họa quá trình tâm cụm ổn định | Tạo hình giải thích hoạt động thuật toán. |
+| `figure_reviews.py` | Lưu nhận xét và đánh giá riêng cho từng biểu đồ | Được danh mục ảnh và báo cáo dùng chung. |
+| `figure_manager.py` | Quét ảnh, ghi danh mục kèm nhận xét và đánh giá | Danh mục được `report.py` dùng để tạo báo cáo có hình và diễn giải. |
+| `report.py` | Tổng hợp bảng, hình, nhận xét và đánh giá thành Markdown/HTML/PDF | Đầu ra cuối của pipeline. |
+| `tracking.py` | Ghi thông tin lần chạy và metrics | Được pipeline dùng để lưu trạng thái và thời gian. |
+| `pipeline.py` | Điều phối các bước theo đúng thứ tự | Kết nối toàn bộ module trên thành một lệnh chạy. |
+| `predict.py` | Nhận thông tin khách mới và dự đoán cụm | Dùng model và scaler đã lưu từ `train_final_model.py`. |
 
-| Thuộc tính | Ý nghĩa |
-|---|---|
-| CustomerID | Mã định danh khách hàng |
-| Gender | Giới tính |
-| Age | Độ tuổi |
-| Annual Income (k$) | Thu nhập hàng năm |
-| Spending Score (1-100) | Điểm chi tiêu của khách hàng |
+Notebook hợp nhất trong `notebooks/` trình bày EDA đến dự đoán khách mới; nó không thay thế luồng chạy chuẩn `python -m src.pipeline`.
 
-Trong quá trình phân cụm, CustomerID được sử dụng để nhận diện khách hàng, không được đưa vào tập đặc trưng huấn luyện.
+## Cấu hình mô hình hiện tại
 
-Các đặc trưng sử dụng cho mô hình gồm:
-- Gender
-- Age
-- Annual Income (k$)
-- Spending Score (1-100)
+Theo `config.yaml`, mô hình cuối dùng:
 
-## 4. Công nghệ và thư viện sử dụng
+- Thuật toán: K-Means tự cài đặt bằng NumPy (`src/models/kmeans.py`).
+- Số cụm: `K = 6`.
+- Đặc trưng: `Age`, `Annual Income (k$)`, `Spending Score (1-100)`.
+- Chuẩn hóa: `StandardScaler`.
+- Khởi tạo tâm: `k-means++`.
+- `random_state = 42`, tối đa 300 vòng lặp.
 
-| Công nghệ | Chức năng |
-|---|---|
-| Python 3.12 | Ngôn ngữ lập trình chính |
-| Pandas | Xử lý dữ liệu |
-| NumPy | Tính toán số học |
-| Matplotlib | Trực quan hóa dữ liệu |
-| Seaborn | Xây dựng biểu đồ thống kê |
-| Scikit-learn | Chuẩn hóa dữ liệu và đánh giá mô hình |
-| Joblib | Lưu và tải mô hình, bộ chuẩn hóa |
-| Jupyter Notebook | Phân tích và trình bày kết quả |
-| Pytest | Kiểm thử chương trình |
-| Git | Quản lý mã nguồn |
+Mô hình đã lưu tại `models/kmeans/mall_customer_kmeans.pkl`; bộ chuẩn hóa đi kèm là `models/kmeans/standard_scaler.pkl`. `models/kmeans/model_metadata.json` ghi lại cấu hình và kết quả của lần huấn luyện đã lưu.
 
-## 5. Cấu trúc thư mục dự án
+Ngoài mô hình cuối, dự án thử nghiệm K từ 2 đến 10, hai tập đặc trưng (có và không có giới tính) và hai cách chuẩn hóa (`StandardScaler`, `MinMaxScaler`). Mục đích là so sánh ảnh hưởng của các lựa chọn này. Cấu hình so sánh riêng trong `config.yaml` là có giới tính + MinMaxScaler + K=2; đây không phải cấu hình mô hình cuối.
+
+## Cấu trúc thư mục
 
 ```text
 Mall_Customer_Clustering/
-│
-├── agents/
-│   ├── problem_definition.md
-│   ├── project_rules.md
-│   └── workflow.md
-│
+├── agents/                 Ghi chú về bài toán, quy tắc và quy trình dự án
 ├── data/
-│   ├── raw/
-│   │   └── Mall_Customers.csv
-│   │
-│   └── processed/
-│       ├── Mall_Customers_StandardScaler.csv
-│       └── Mall_Customers_MinMaxScaler.csv
-│
-├── docs/
-│   └── images/
-│
-├── logs/
-│
+│   ├── raw/                 Dữ liệu gốc Mall_Customers.csv
+│   └── processed/           CSV sau chuẩn hóa
+├── docs/                   Nhật ký thực nghiệm và danh mục hình
+├── logs/                   Nhật ký chạy pipeline
 ├── models/
-│   ├── kmeans/
-│   └── preprocessing/
-│
-├── notebooks/
-│   ├── 01_exploratory_data_analysis.ipynb
-│   └── 02_kmeans_clustering.ipynb
-│
-├── progress_results/
-│
+│   ├── kmeans/              Mô hình cuối, scaler và metadata đã lưu
+│   └── preprocessing/      Scaler của bước tiền xử lý tổng quát
+├── notebooks/               Một notebook EDA, phân cụm và dự đoán
+├── progress_results/        Bảng kết quả, phân cụm, metrics và tracking runs
 ├── reports/
-│   ├── archive/
-│   └── figures/
-│       └── customer_segmentation/
-│
+│   ├── figures/             Biểu đồ được tạo trong quá trình phân tích
+│   └── report_*.md/html/pdf Báo cáo theo từng lần chạy
 ├── src/
-│   ├── models/
-│   │   └── kmeans.py
-│   │
-│   ├── cluster_analysis.py
-│   ├── demo_convergence.py
-│   ├── eda.py
-│   ├── evaluate.py
-│   ├── experiments.py
-│   ├── figure_manager.py
-│   ├── pipeline.py
-│   ├── predict.py
-│   ├── preprocess.py
-│   ├── report.py
-│   ├── tracking.py
-│   ├── train.py
-│   └── train_final_model.py
-│
-├── tests/
-│   ├── test_kmeans.py
-│   └── test_preprocessing.py
-│
-├── .gitignore
-├── config.yaml
-├── README.md
-└── requirements.txt
+│   ├── feature_processing.py Dùng chung bước làm sạch và chuẩn bị feature
+│   ├── models/kmeans.py     Cài đặt thuật toán K-Means
+│   ├── cluster_analysis.py  Mô tả đặc điểm cụm khách hàng
+│   ├── config.py            Đọc config.yaml và phân giải đường dẫn
+│   ├── demo_convergence.py  Minh họa tâm cụm hội tụ
+│   ├── eda.py               Phân tích khám phá dữ liệu
+│   ├── evaluate.py          Đánh giá nhiều giá trị K
+│   ├── experiments.py       So sánh đặc trưng và scaler
+│   ├── figure_reviews.py   Nhận xét và đánh giá từng biểu đồ
+│   ├── figure_manager.py    Quản lý danh mục biểu đồ
+│   ├── pipeline.py          Chạy tuần tự toàn bộ quy trình
+│   ├── predict.py           Dự đoán cụm cho khách mới
+│   ├── preprocess.py        Làm sạch, mã hóa và chuẩn hóa dữ liệu
+│   ├── report.py            Tạo báo cáo
+│   ├── tracking.py          Ghi thông tin lần chạy và metrics
+│   ├── train.py             Huấn luyện và tạo kết quả Elbow
+│   └── train_final_model.py Huấn luyện và lưu mô hình cuối
+├── tests/                   Kiểm thử K-Means và tiền xử lý
+├── config.yaml              Cấu hình dùng chung
+├── requirements.txt         Danh sách thư viện Python
+└── README.md
 ```
 
-## 6. Quy trình thực hiện dự án
+Các bản sao trước khi chạy pipeline được giữ trong `backups/` trên máy này; thư mục này được loại khỏi Git.
 
-Dự án được triển khai theo các giai đoạn sau:
+## Cài đặt
 
-### Giai đoạn 1: Phân tích khám phá dữ liệu (EDA)
-
-Thực hiện:
-- Đọc dữ liệu khách hàng.
-- Kiểm tra số lượng bản ghi và thuộc tính.
-- Kiểm tra dữ liệu thiếu.
-- Kiểm tra dữ liệu trùng lặp.
-- Thống kê mô tả.
-- Phân tích phân phối các thuộc tính.
-- Xây dựng biểu đồ trực quan.
-- Phân tích mối tương quan giữa các thuộc tính.
-
-### Giai đoạn 2: Tiền xử lý dữ liệu
-
-Các công việc:
-- Lựa chọn những thuộc tính phù hợp.
-- Mã hóa thuộc tính Gender.
-- Chuẩn hóa dữ liệu bằng StandardScaler.
-- Chuẩn hóa dữ liệu bằng MinMaxScaler.
-- Lưu dữ liệu sau tiền xử lý.
-- Lưu bộ chuẩn hóa bằng Joblib.
-
-Hai phương pháp chuẩn hóa được sử dụng để phục vụ quá trình thực nghiệm và so sánh.
-
-### Giai đoạn 3: Xây dựng thuật toán K-Means
-
-Dự án xây dựng lớp KMeans tại:
-
-`src/models/kmeans.py`
-
-Các thành phần chính:
-- Khởi tạo các tâm cụm.
-- Tính khoảng cách giữa dữ liệu và tâm cụm.
-- Gán dữ liệu vào cụm gần nhất.
-- Cập nhật vị trí tâm cụm.
-- Kiểm tra điều kiện hội tụ.
-- Tính toán Inertia.
-- Dự đoán cụm cho dữ liệu mới.
-
-Thuật toán được xây dựng theo hướng lập trình hướng đối tượng.
-
-### Giai đoạn 4: Xác định số cụm tối ưu
-
-Sử dụng phương pháp Elbow để khảo sát số lượng cụm K.
-
-Thực nghiệm với các giá trị:
-
-`K = 2 đến K = 10`
-
-Dựa trên sự thay đổi của Inertia để quan sát điểm khuỷu và lựa chọn số lượng cụm phù hợp.
-
-### Giai đoạn 5: Đánh giá chất lượng phân cụm
-
-Sử dụng ba chỉ số đánh giá:
-
-**Silhouette Score**
-
-Đánh giá mức độ gần gũi của một điểm dữ liệu với cụm của nó so với các cụm khác. Giá trị càng cao thường thể hiện kết quả phân cụm càng tốt.
-
-**Davies-Bouldin Index**
-
-Đánh giá sự tương đồng giữa các cụm. Giá trị càng thấp thường thể hiện các cụm càng tách biệt.
-
-**Calinski-Harabasz Score**
-
-Đánh giá tỷ lệ giữa độ phân tán giữa các cụm và độ phân tán bên trong cụm. Giá trị càng cao thường thể hiện chất lượng phân cụm càng tốt.
-
-### Giai đoạn 6: Thực nghiệm và so sánh
-
-Dự án thực hiện các thử nghiệm với:
-- Không sử dụng thuộc tính giới tính.
-- Có sử dụng thuộc tính giới tính.
-- StandardScaler.
-- MinMaxScaler.
-- Nhiều giá trị K khác nhau.
-
-Mục tiêu là so sánh ảnh hưởng của lựa chọn đặc trưng và phương pháp chuẩn hóa đến chất lượng phân cụm.
-
-### Giai đoạn 7: Phân tích đặc điểm từng cụm
-
-Sau khi phân cụm, tiến hành:
-- Thống kê số lượng khách hàng trong mỗi cụm.
-- Tính độ tuổi trung bình.
-- Tính thu nhập trung bình.
-- Tính điểm chi tiêu trung bình.
-- Phân tích phân bố giới tính.
-- Trực quan hóa kết quả.
-
-### Giai đoạn 8: Lưu mô hình và dự đoán
-
-Mô hình cuối cùng được xây dựng tại:
-
-`src/train_final_model.py`
-
-Mô hình và bộ chuẩn hóa được lưu để sử dụng lại.
-
-Chương trình dự đoán được xây dựng tại:
-
-`src/predict.py`
-
-Người dùng có thể nhập thông tin khách hàng:
-- Giới tính.
-- Độ tuổi.
-- Thu nhập hàng năm.
-- Điểm chi tiêu.
-
-Hệ thống thực hiện tiền xử lý dữ liệu và dự đoán nhóm khách hàng tương ứng.
-
-### Giai đoạn 9: Tự động hóa Pipeline
-
-Tệp thực thi chính:
-
-`src/pipeline.py`
-
-Pipeline điều phối các giai đoạn phân tích, huấn luyện, đánh giá, thực nghiệm, quản lý biểu đồ và tạo báo cáo.
-
-Quá trình thực thi được ghi nhận thông qua hệ thống Log và Tracking.
-
-## 7. Kết quả thực nghiệm
-
-### 7.1. Kết quả phân tích dữ liệu
-
-- Bộ dữ liệu gồm 200 khách hàng.
-- Có 5 thuộc tính ban đầu.
-- Không phát hiện dữ liệu thiếu trong kết quả kiểm tra.
-- Không phát hiện bản ghi trùng lặp trong kết quả kiểm tra.
-
-### 7.2. Kết quả đánh giá mô hình
-
-Các chỉ số được sử dụng để so sánh chất lượng phân cụm:
-
-- Silhouette Score.
-- Davies-Bouldin Index.
-- Calinski-Harabasz Score.
-- Inertia.
-
-Kết quả thực nghiệm cho thấy việc lựa chọn đặc trưng và phương pháp chuẩn hóa có ảnh hưởng đến chất lượng phân cụm.
-
-### 7.3. Mô hình cuối cùng
-
-Cấu hình mô hình cuối cùng đã được chạy thử:
-
-- Thuật toán: K-Means.
-- Số cụm: K = 2.
-- Phương pháp chuẩn hóa: MinMaxScaler.
-- Số thuộc tính đầu vào: 4.
-- Bộ dữ liệu: 200 khách hàng.
-
-Mô hình và bộ chuẩn hóa được lưu bằng Joblib.
-
-### 7.4. Kết quả dự đoán
-
-Chương trình dự đoán đã được chạy thử thành công với thông tin khách hàng nhập từ bàn phím.
-
-Kết quả trả về mã cụm khách hàng tương ứng.
-
-## 8. Hướng dẫn cài đặt và sử dụng
-
-### Bước 1: Tải dự án
-
-```bash
-git clone <LINK_GITHUB_CUA_BAN>
-```
-
-### Bước 2: Di chuyển vào thư mục dự án
-
-```bash
-cd Mall_Customer_Clustering
-```
-
-### Bước 3: Tạo môi trường ảo
-
-```bash
-python -m venv .venv
-```
-
-### Bước 4: Kích hoạt môi trường ảo
-
-Đối với Windows PowerShell:
+Yêu cầu Python 3.12. Các phiên bản thư viện trực tiếp đã được ghim trong `requirements.txt`. Trong PowerShell, chọn interpreter Python 3.12 rồi tạo môi trường riêng:
 
 ```powershell
+$python312 = "$env:LOCALAPPDATA\Programs\Python\Python312\python.exe"
+& $python312 --version
+& $python312 -m venv .venv
 .\.venv\Scripts\Activate.ps1
+python -m pip install -r requirements.txt
 ```
 
-### Bước 5: Cài đặt thư viện
+Nếu Python 3.12 được cài ở vị trí khác, thay `$python312` bằng đường dẫn tới interpreter đó. Không dùng Python MSYS nếu thiếu wheel Windows cho NumPy/SciPy. Nếu PowerShell chặn kích hoạt môi trường, gọi trực tiếp `.venv\Scripts\python.exe`.
 
-```bash
-pip install -r requirements.txt
+## Cách sử dụng
+
+Chạy toàn bộ quy trình phân tích và tạo báo cáo:
+
+```powershell
+python -m src.pipeline
 ```
 
-### Bước 6: Chạy toàn bộ Pipeline
+Huấn luyện riêng mô hình cuối theo cấu hình trong `config.yaml`:
 
-```bash
-python src/pipeline.py
+```powershell
+python -m src.train_final_model
 ```
 
-### Bước 7: Chạy chương trình dự đoán
+Dự đoán cụm cho một khách hàng mới (chương trình hỏi tuổi, thu nhập và điểm chi tiêu):
 
-```bash
-python src/predict.py
+```powershell
+python -m src.predict
 ```
 
-### Bước 8: Kiểm thử chương trình
+Có thể mở hai notebook trong Jupyter để xem các bước tương tác:
 
-```bash
+- `notebooks/mall_customer_clustering.ipynb`: notebook duy nhất, gồm EDA, tiền xử lý, scaling, chọn K, đánh giá, hồ sơ cụm, dự đoán mẫu và cấu hình so sánh.
+- Các ảnh trong notebook được lưu thành file riêng dưới `notebooks/reports/figures/customer_segmentation/unified/`; kết quả bảng lưu dưới `notebooks/progress_results/unified_notebook/`.
+- Cấu hình so sánh `with_gender + MinMaxScaler + K=2` được ghi tách biệt; mô hình cuối của pipeline chính vẫn là `without_gender + StandardScaler + K=6`.
+
+## Kết quả và báo cáo
+
+- `data/processed/`: dữ liệu đã chuẩn hóa theo StandardScaler và MinMaxScaler.
+- `progress_results/`: kết quả Elbow, metrics, thực nghiệm, hồ sơ cụm và dữ liệu khách hàng được gán cụm.
+- `models/kmeans/`: mô hình và scaler đã lưu, cùng metadata lần huấn luyện.
+- `reports/`: báo cáo Markdown, HTML, PDF và hình minh họa.
+- `logs/pipeline.log`: nhật ký các giai đoạn pipeline.
+- `docs/experiment_logs.csv`: nhật ký tracking các lần chạy.
+
+Các báo cáo có dấu thời gian; hãy mở báo cáo có thời gian mới nhất để xem kết quả gần nhất. Một lần chạy pipeline có thể tạo thêm hoặc cập nhật các file kết quả.
+
+## Kiểm thử
+
+Chạy các kiểm thử hiện có bằng:
+
+```powershell
 python -m pytest -v
 ```
 
-## 9. Các Notebook trong dự án
+## Lưu ý khi đọc kết quả
 
-Dự án sử dụng hai Notebook chính:
-
-**01_exploratory_data_analysis.ipynb**
-
-Thực hiện phân tích khám phá dữ liệu, thống kê mô tả, trực quan hóa và đánh giá mối tương quan giữa các thuộc tính.
-
-**02_kmeans_clustering.ipynb**
-
-Trình bày quá trình tiền xử lý dữ liệu, xây dựng K-Means, xác định số cụm, đánh giá chất lượng và phân tích đặc điểm khách hàng sau phân cụm.
-
-## 10. Hướng phát triển
-
-Một số hướng phát triển trong tương lai:
-
-- Thử nghiệm thêm các thuật toán phân cụm khác.
-- Cải thiện phương pháp lựa chọn số cụm.
-- Bổ sung thêm các chỉ số đánh giá.
-- Xây dựng giao diện trực quan để người dùng nhập thông tin khách hàng.
-- Phát triển hệ thống phân tích khách hàng tương tác.
-- Tích hợp mô hình vào ứng dụng hỗ trợ quản lý và tiếp thị.
-
-## 11. Kết luận
-
-Dự án đã triển khai quy trình phân tích và phân cụm khách hàng bằng thuật toán K-Means.
-
-Thông qua các bước phân tích dữ liệu, tiền xử lý, xây dựng mô hình, thực nghiệm và đánh giá, dự án cho thấy khả năng ứng dụng kỹ thuật học máy không giám sát trong bài toán phân nhóm khách hàng.
-
-Ngoài việc xây dựng mô hình, dự án còn triển khai hệ thống Pipeline, kiểm thử chương trình, lưu trữ mô hình và hỗ trợ dự đoán nhóm khách hàng mới.
-
----
-
-**Tên dự án:** Mall Customer Clustering
-
-**Lĩnh vực:** Khai phá dữ liệu và Học máy
-
-**Thuật toán chính:** K-Means Clustering
-
-**Ngôn ngữ lập trình:** Python
+- Elbow/Inertia, Silhouette, Davies–Bouldin và Calinski–Harabasz là các góc nhìn khác nhau để so sánh cấu hình; không có một con số duy nhất tự động chứng minh nhóm là hoàn hảo.
+- Mã cụm như `0` đến `5` chỉ là nhãn kỹ thuật. Cụm số 0 không tốt hơn cụm số 1; hãy xem hồ sơ tuổi, thu nhập và chi tiêu để hiểu ý nghĩa từng nhóm.
+- `config.yaml` là nguồn cấu hình để huấn luyện/dự đoán mới. `model_metadata.json` mô tả mô hình đã lưu. Nếu thay cấu hình, hãy huấn luyện lại mô hình cuối trước khi dự đoán để mô hình, scaler và đặc trưng khớp nhau.

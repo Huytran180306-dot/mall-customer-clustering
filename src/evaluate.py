@@ -1,3 +1,18 @@
+"""
+Model evaluation module for Mall Customer Clustering.
+
+Responsibilities:
+1. Load raw customer data.
+2. Select features from final_model configuration.
+3. Encode categorical features when required.
+4. Apply the configured scaler.
+5. Train custom K-Means for different K values.
+6. Calculate clustering evaluation metrics.
+7. Save evaluation results.
+8. Generate metric comparison visualizations.
+9. Identify the best K according to each metric.
+"""
+
 import sys
 from pathlib import Path
 
@@ -5,97 +20,289 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 
+from sklearn.preprocessing import StandardScaler, MinMaxScaler
+
 from sklearn.metrics import (
     silhouette_score,
     davies_bouldin_score,
     calinski_harabasz_score
 )
 
-# Add project root to Python path
+
+# ============================================================
+# 1. PROJECT CONFIGURATION
+# ============================================================
+
 ROOT_DIR = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT_DIR))
 
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
+
+from src.config import get_config, get_path
 from src.models.kmeans import KMeans
+from src.feature_processing import clean_records, prepare_feature_frame
 
 
-# ==========================================
-# 1. CONFIGURATION
-# ==========================================
+# ============================================================
+# 2. CENTRALIZED CONFIGURATION
+# ============================================================
 
-DATA_PATH = (
-    ROOT_DIR /
-    "data/processed/Mall_Customers_StandardScaler.csv"
-)
+DATA_PATH = get_path("data", "raw_path")
 
-RESULT_DIR = ROOT_DIR / "progress_results"
+RESULT_DIR = get_path("paths", "progress")
 
 FIGURE_DIR = (
-    ROOT_DIR /
-    "reports/figures/customer_segmentation/03_evaluation"
+    get_path("paths", "figures")
+    / "03_evaluation"
 )
 
-K_VALUES = range(2, 11)
+# Main model configuration
+FINAL_CONFIG = get_config("final_model")
 
-RANDOM_STATE = 42
-MAX_ITER = 300
-TOLERANCE = 0.0001
+FEATURE_SPACE = FINAL_CONFIG["feature_space"]
 
-RESULT_DIR.mkdir(parents=True, exist_ok=True)
-FIGURE_DIR.mkdir(parents=True, exist_ok=True)
+FEATURE_COLUMNS = get_config(
+    "experiments",
+    "feature_spaces",
+    FEATURE_SPACE
+)
+
+SCALER_NAME = FINAL_CONFIG["scaler"]
+
+# Gender encoding
+GENDER_MAPPING = get_config(
+    "preprocessing",
+    "encoding",
+    "mapping",
+    default={}
+)
+
+# Model parameters
+MODEL_DEFAULTS = get_config("model")
+
+K_VALUES = get_config(
+    "experiments",
+    "k_values"
+)
+
+RANDOM_STATE = FINAL_CONFIG.get(
+    "random_state",
+    MODEL_DEFAULTS.get("random_state", 42)
+)
+
+MAX_ITER = FINAL_CONFIG.get(
+    "max_iterations",
+    MODEL_DEFAULTS.get("max_iterations", 300)
+)
+
+TOLERANCE = FINAL_CONFIG.get(
+    "tolerance",
+    MODEL_DEFAULTS.get("tolerance", 0.0001)
+)
+
+INITIALIZATION = FINAL_CONFIG.get(
+    "initialization",
+    MODEL_DEFAULTS.get("initialization", "k-means++")
+)
+
+# Evaluation metrics
+CONFIG_METRICS = get_config(
+    "evaluation",
+    "metrics",
+    default=[]
+)
+
+SCALER_CLASSES = {
+    "StandardScaler": StandardScaler,
+    "MinMaxScaler": MinMaxScaler
+}
 
 
-# ==========================================
-# 2. LOAD DATA
-# ==========================================
+# ============================================================
+# 3. METRIC REGISTRY
+# ============================================================
+
+METRIC_REGISTRY = {
+
+    "silhouette_score": {
+        "column": "Silhouette_Score",
+        "function": silhouette_score,
+        "direction": "max"
+    },
+
+    "davies_bouldin_score": {
+        "column": "Davies_Bouldin_Index",
+        "function": davies_bouldin_score,
+        "direction": "min"
+    },
+
+    "calinski_harabasz_score": {
+        "column": "Calinski_Harabasz_Score",
+        "function": calinski_harabasz_score,
+        "direction": "max"
+    }
+
+}
+
+REQUIRED_METRICS = {
+    "silhouette_score",
+    "davies_bouldin_score",
+    "calinski_harabasz_score"
+}
+
+
+# ============================================================
+# 4. VALIDATE CONFIGURATION
+# ============================================================
+
+if not K_VALUES:
+    raise ValueError(
+        "K values are missing in config.yaml."
+    )
+
+if any(
+    not isinstance(k, int) or k < 2
+    for k in K_VALUES
+):
+    raise ValueError(
+        "All K values must be integers >= 2."
+    )
+
+if len(set(K_VALUES)) != len(K_VALUES):
+    raise ValueError(
+        "Duplicate K values detected."
+    )
+
+if FEATURE_SPACE not in (
+    "with_gender",
+    "without_gender"
+):
+    raise ValueError(
+        f"Unsupported feature space: {FEATURE_SPACE}"
+    )
+
+if not FEATURE_COLUMNS:
+    raise ValueError(
+        "Feature columns are missing in config.yaml."
+    )
+
+if SCALER_NAME not in SCALER_CLASSES:
+    raise ValueError(
+        f"Unsupported scaler: {SCALER_NAME}"
+    )
+
+if not CONFIG_METRICS:
+    raise ValueError(
+        "Evaluation metrics are missing in config.yaml."
+    )
+
+if not REQUIRED_METRICS.issubset(set(CONFIG_METRICS)):
+    raise ValueError(
+        "Silhouette, Davies-Bouldin and "
+        "Calinski-Harabasz metrics are required."
+    )
+
+for metric in CONFIG_METRICS:
+
+    if metric not in METRIC_REGISTRY:
+        raise ValueError(
+            f"Unsupported evaluation metric: {metric}"
+        )
+
+
+# ============================================================
+# 5. PREPARE DIRECTORIES
+# ============================================================
+
+RESULT_DIR.mkdir(
+    parents=True,
+    exist_ok=True
+)
+
+FIGURE_DIR.mkdir(
+    parents=True,
+    exist_ok=True
+)
+
+
+# ============================================================
+# 6. LOAD AND PREPARE DATA
+# ============================================================
 
 def load_data():
 
-    print("\n========== LOADING DATA ==========")
+    print("\n========== LOADING RAW DATA ==========")
 
     if not DATA_PATH.exists():
+
         raise FileNotFoundError(
             f"Dataset not found: {DATA_PATH}"
         )
 
-    df = pd.read_csv(DATA_PATH)
-
-    X = df.to_numpy(dtype=float)
-
-    if not np.isfinite(X).all():
-        raise ValueError(
-            "Dataset contains missing or infinite values."
-        )
+    df = clean_records(pd.read_csv(DATA_PATH))
+    X = prepare_feature_frame(df, FEATURE_COLUMNS, GENDER_MAPPING)
 
     print("Dataset shape:", X.shape)
 
-    return X
+    print("Feature space:", FEATURE_SPACE)
+
+    print("Features:", FEATURE_COLUMNS)
+
+    print("Scaler:", SCALER_NAME)
+
+    # Apply scaler
+    scaler = SCALER_CLASSES[SCALER_NAME]()
+
+    X_scaled = scaler.fit_transform(X)
+
+    if not np.isfinite(X_scaled).all():
+
+        raise ValueError(
+            "Scaled data contains invalid values."
+        )
+
+    print("Scaling completed successfully.")
+
+    return X_scaled
 
 
-# ==========================================
-# 3. CALCULATE METRICS
-# ==========================================
+# ============================================================
+# 7. CALCULATE METRICS
+# ============================================================
 
 def evaluate_model(X, labels):
 
     unique_labels = np.unique(labels)
 
-    if len(unique_labels) < 2 or len(unique_labels) >= len(X):
+    if (
+        len(unique_labels) < 2
+        or len(unique_labels) >= len(X)
+    ):
+
         raise ValueError(
             "Invalid number of clusters for evaluation."
         )
 
-    silhouette = silhouette_score(X, labels)
+    metrics = {}
 
-    dbi = davies_bouldin_score(X, labels)
+    for metric_name in CONFIG_METRICS:
 
-    ch = calinski_harabasz_score(X, labels)
+        metric_config = METRIC_REGISTRY[metric_name]
 
-    return silhouette, dbi, ch
+        metric_function = metric_config["function"]
+
+        column_name = metric_config["column"]
+
+        metrics[column_name] = float(
+            metric_function(X, labels)
+        )
+
+    return metrics
 
 
-# ==========================================
-# 4. RUN EVALUATION EXPERIMENTS
-# ==========================================
+# ============================================================
+# 8. RUN EVALUATION EXPERIMENTS
+# ============================================================
 
 def run_experiments(X):
 
@@ -105,6 +312,12 @@ def run_experiments(X):
 
     for k in K_VALUES:
 
+        if k >= len(X):
+
+            raise ValueError(
+                f"K={k} must be smaller than sample count."
+            )
+
         print(f"\nEvaluating K = {k}")
 
         model = KMeans(
@@ -112,50 +325,64 @@ def run_experiments(X):
             max_iter=MAX_ITER,
             tol=TOLERANCE,
             random_state=RANDOM_STATE,
-            init="k-means++"
+            init=INITIALIZATION
         )
 
-        model.fit(X)
+        labels = model.fit_predict(X)
 
-        labels = model.labels_
-
-        silhouette, dbi, ch = evaluate_model(
+        metrics = evaluate_model(
             X,
             labels
         )
 
-        results.append({
+        result = {
 
             "K": k,
 
             "Inertia": model.inertia_,
 
-            "Silhouette_Score": silhouette,
-
-            "Davies_Bouldin_Index": dbi,
-
-            "Calinski_Harabasz_Score": ch,
+            **metrics,
 
             "Iterations": model.n_iter_,
 
-            "Actual_Clusters": len(np.unique(labels))
+            "Actual_Clusters": len(
+                np.unique(labels)
+            )
 
-        })
+        }
 
-        print("Inertia:", round(model.inertia_, 4))
+        results.append(result)
 
-        print("Silhouette:", round(silhouette, 4))
+        print(
+            "Inertia:",
+            round(model.inertia_, 4)
+        )
 
-        print("Davies-Bouldin:", round(dbi, 4))
+        for metric_name in CONFIG_METRICS:
 
-        print("Calinski-Harabasz:", round(ch, 4))
+            column = METRIC_REGISTRY[
+                metric_name
+            ]["column"]
 
-    return pd.DataFrame(results)
+            print(
+                f"{column}:",
+                round(metrics[column], 4)
+            )
+
+    results_df = pd.DataFrame(results)
+
+    if len(results_df) != len(K_VALUES):
+
+        raise RuntimeError(
+            "Evaluation experiment count mismatch."
+        )
+
+    return results_df
 
 
-# ==========================================
-# 5. SAVE METRICS
-# ==========================================
+# ============================================================
+# 9. SAVE METRICS
+# ============================================================
 
 def save_results(results):
 
@@ -171,9 +398,9 @@ def save_results(results):
     print("\nMetrics saved:", output_path)
 
 
-# ==========================================
-# 6. VISUALIZE METRICS
-# ==========================================
+# ============================================================
+# 10. VISUALIZE METRICS
+# ============================================================
 
 def plot_metric(
     results,
@@ -191,7 +418,10 @@ def plot_metric(
         marker="o"
     )
 
-    plt.title(title)
+    plt.title(
+        f"{title}\n"
+        f"{FEATURE_SPACE} - {SCALER_NAME}"
+    )
 
     plt.xlabel("Number of Clusters (K)")
 
@@ -216,40 +446,50 @@ def plot_metric(
     print("Figure saved:", output_path)
 
 
-# ==========================================
-# 7. ANALYZE BEST RESULTS
-# ==========================================
+# ============================================================
+# 11. ANALYZE BEST RESULTS
+# ============================================================
 
 def analyze_best_results(results):
 
     print("\n========== BEST METRIC RESULTS ==========")
 
-    best_silhouette = results.loc[
-        results["Silhouette_Score"].idxmax()
-    ]
+    if results.empty:
 
-    best_dbi = results.loc[
-        results["Davies_Bouldin_Index"].idxmin()
-    ]
+        raise ValueError(
+            "No evaluation results available."
+        )
 
-    best_ch = results.loc[
-        results["Calinski_Harabasz_Score"].idxmax()
-    ]
+    for metric_name in CONFIG_METRICS:
 
-    print(
-        "Best Silhouette K:",
-        int(best_silhouette["K"])
-    )
+        metric_config = METRIC_REGISTRY[
+            metric_name
+        ]
 
-    print(
-        "Best Davies-Bouldin K:",
-        int(best_dbi["K"])
-    )
+        column = metric_config["column"]
 
-    print(
-        "Best Calinski-Harabasz K:",
-        int(best_ch["K"])
-    )
+        direction = metric_config["direction"]
+
+        if direction == "max":
+
+            best = results.loc[
+                results[column].idxmax()
+            ]
+
+        else:
+
+            best = results.loc[
+                results[column].idxmin()
+            ]
+
+        print(f"\nMetric: {column}")
+
+        print("Best K:", int(best["K"]))
+
+        print(
+            "Score:",
+            round(best[column], 4)
+        )
 
     print(
         "\nNote: Compare all three metrics "
@@ -257,17 +497,27 @@ def analyze_best_results(results):
     )
 
 
-# ==========================================
-# 8. MAIN
-# ==========================================
+# ============================================================
+# 12. MAIN
+# ============================================================
 
 def main():
 
-    print("\n================================")
+    print("\n========================================")
 
     print("MALL CUSTOMER CLUSTERING EVALUATION")
 
-    print("================================")
+    print("========================================")
+
+    print("Feature space:", FEATURE_SPACE)
+
+    print("Features:", FEATURE_COLUMNS)
+
+    print("Scaler:", SCALER_NAME)
+
+    print("K values:", list(K_VALUES))
+
+    print("Random state:", RANDOM_STATE)
 
     X = load_data()
 
@@ -307,11 +557,11 @@ def main():
 
     analyze_best_results(results)
 
-    print("\n================================")
+    print("\n========================================")
 
     print("EVALUATION COMPLETED SUCCESSFULLY!")
 
-    print("================================")
+    print("========================================")
 
 
 if __name__ == "__main__":

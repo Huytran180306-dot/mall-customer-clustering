@@ -1,5 +1,6 @@
 ﻿# Python virtual environment
 .venv/
+.venv_*/
 venv/
 env/
 # Dataset - download separately from Kaggle
@@ -41,3 +42,12 @@ progress_results/RUN_*/
 .ipython/
 .coverage
 htmlcov/
+
+# Generated report artifacts
+/reports/report_REPORT_*.md
+/reports/report_REPORT_*.html
+/reports/report_REPORT_*.pdf
+
+# Local backup files
+/config.yaml.backup
+backups/

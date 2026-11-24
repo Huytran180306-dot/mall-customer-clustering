@@ -6,6 +6,7 @@ from src.preprocess import (
     encode_gender,
     scale_features
 )
+from src.feature_processing import prepare_feature_frame
 
 
 def sample_data():
@@ -79,3 +80,15 @@ def test_preprocessing_pipeline():
 
     assert standard_df.isnull().sum().sum() == 0
     assert minmax_df.isnull().sum().sum() == 0
+
+
+def test_raw_and_encoded_gender_use_same_feature_values():
+    mapping = {"Male": 0, "Female": 1}
+    columns = ["Gender", "Age"]
+    raw = pd.DataFrame({"Gender": [" male ", "FEMALE"], "Age": [25, 40]})
+    encoded = pd.DataFrame({"Gender": [0, 1], "Age": [25, 40]})
+
+    raw_features = prepare_feature_frame(raw, columns, mapping)
+    encoded_features = prepare_feature_frame(encoded, columns, mapping)
+
+    pd.testing.assert_frame_equal(raw_features, encoded_features)

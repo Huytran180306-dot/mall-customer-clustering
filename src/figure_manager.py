@@ -2,6 +2,9 @@ from pathlib import Path
 from datetime import datetime
 import csv
 
+from src.config import get_path
+from src.figure_reviews import review_figure
+
 
 # ==========================================
 # CONFIGURATION
@@ -9,12 +12,9 @@ import csv
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
 
-FIGURE_ROOT = (
-    ROOT_DIR
-    / "reports/figures/customer_segmentation"
-)
+FIGURE_ROOT = get_path("paths", "figures")
 
-OUTPUT_DIR = ROOT_DIR / "docs/images"
+OUTPUT_DIR = get_path("paths", "docs") / "images"
 
 CATALOG_PATH = OUTPUT_DIR / "figure_catalog.csv"
 
@@ -76,22 +76,20 @@ def scan_figures():
             timespec="seconds"
         )
 
+        observation, assessment = review_figure(
+            path.name, category
+        )
+
         record = {
-
             "Figure_ID": f"FIG_{index:04d}",
-
             "Category": category,
-
             "Filename": path.name,
-
             "Format": path.suffix.lower(),
-
             "Relative_Path": relative_path.as_posix(),
-
             "Size_Bytes": file_stat.st_size,
-
-            "Modified_At": modified_time
-
+            "Modified_At": modified_time,
+            "Observation": observation,
+            "Assessment": assessment
         }
 
         figures.append(record)
@@ -121,7 +119,9 @@ def export_catalog(figures):
         "Format",
         "Relative_Path",
         "Size_Bytes",
-        "Modified_At"
+        "Modified_At",
+        "Observation",
+        "Assessment"
     ]
 
     with CATALOG_PATH.open(
@@ -136,7 +136,6 @@ def export_catalog(figures):
         )
 
         writer.writeheader()
-
         writer.writerows(figures)
 
     print("Catalog saved:", CATALOG_PATH)
@@ -176,10 +175,11 @@ def category_summary(figures):
 def main():
 
     print("\n================================")
-
     print("MALL CUSTOMER FIGURE MANAGER")
-
     print("================================")
+
+    print("Figure directory:", FIGURE_ROOT)
+    print("Catalog directory:", CATALOG_PATH)
 
     prepare_directories()
 
@@ -190,9 +190,7 @@ def main():
     category_summary(figures)
 
     print("\n================================")
-
     print("FIGURE MANAGEMENT COMPLETED!")
-
     print("================================")
 
 
