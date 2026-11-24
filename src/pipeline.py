@@ -77,6 +77,11 @@ PIPELINE_STAGES = [
     },
 
     {
+        "name": "FINAL MODEL TRAINING",
+        "module": "src.train_final_model"
+    },
+
+    {
         "name": "CLUSTERING EVALUATION",
         "module": "src.evaluate"
     },

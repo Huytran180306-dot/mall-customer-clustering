@@ -3,6 +3,7 @@ from datetime import datetime
 import csv
 
 from src.config import get_path
+from src.figure_reviews import review_figure
 
 
 # ==========================================
@@ -75,6 +76,10 @@ def scan_figures():
             timespec="seconds"
         )
 
+        observation, assessment = review_figure(
+            path.name, category
+        )
+
         record = {
             "Figure_ID": f"FIG_{index:04d}",
             "Category": category,
@@ -82,7 +87,9 @@ def scan_figures():
             "Format": path.suffix.lower(),
             "Relative_Path": relative_path.as_posix(),
             "Size_Bytes": file_stat.st_size,
-            "Modified_At": modified_time
+            "Modified_At": modified_time,
+            "Observation": observation,
+            "Assessment": assessment
         }
 
         figures.append(record)
@@ -112,7 +119,9 @@ def export_catalog(figures):
         "Format",
         "Relative_Path",
         "Size_Bytes",
-        "Modified_At"
+        "Modified_At",
+        "Observation",
+        "Assessment"
     ]
 
     with CATALOG_PATH.open(

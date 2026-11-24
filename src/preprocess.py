@@ -17,6 +17,7 @@ import pandas as pd
 from sklearn.preprocessing import StandardScaler, MinMaxScaler
 
 from src.config import get_config, get_path
+from src.feature_processing import clean_records, prepare_feature_frame
 
 
 # ============================================================
@@ -33,14 +34,6 @@ FEATURE_COLUMNS = get_config(
 
 GENDER_MAPPING = get_config(
     "preprocessing", "encoding", "mapping"
-)
-
-HANDLE_MISSING = get_config(
-    "preprocessing", "handle_missing_values", default=True
-)
-
-DROP_DUPLICATES = get_config(
-    "preprocessing", "drop_duplicates", default=True
 )
 
 SCALER_NAMES = get_config(
@@ -95,19 +88,9 @@ def clean_data(df):
 
     print("\nCLEANING DATA...")
 
-    df = df.copy()
-
-    df.columns = df.columns.str.strip()
-
-    if DROP_DUPLICATES:
-        before = len(df)
-        df = df.drop_duplicates()
-        print("Duplicates removed:", before - len(df))
-
-    if HANDLE_MISSING:
-        before = len(df)
-        df = df.dropna()
-        print("Missing records removed:", before - len(df))
+    before = len(df)
+    df = clean_records(df)
+    print("Duplicates or missing records removed:", before - len(df))
 
     print("Missing values remaining:", df.isnull().sum().sum())
     print("Duplicates remaining:", df.duplicated().sum())
@@ -158,23 +141,11 @@ def encode_gender(df):
     if "Gender" not in df.columns:
         return df
 
-    if not GENDER_MAPPING:
-        raise ValueError(
-            "Gender mapping is missing in config.yaml."
-        )
-
-    gender_values = df["Gender"].astype(str).str.strip()
-
-    encoded = gender_values.map(GENDER_MAPPING)
-
-    if encoded.isna().any():
-        unknown_values = gender_values[encoded.isna()].unique()
-
-        raise ValueError(
-            f"Unknown Gender values: {unknown_values.tolist()}"
-        )
-
-    df["Gender"] = encoded.astype(int)
+    df = prepare_feature_frame(
+        df,
+        list(df.columns),
+        GENDER_MAPPING
+    )
 
     print("Gender mapping:", GENDER_MAPPING)
 

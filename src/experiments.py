@@ -37,6 +37,7 @@ if str(ROOT_DIR) not in sys.path:
 
 from src.config import get_config, get_path
 from src.models.kmeans import KMeans
+from src.feature_processing import clean_records, prepare_feature_frame
 
 
 # ============================================================
@@ -74,14 +75,6 @@ INITIALIZATION = get_config(
 
 GENDER_MAPPING = get_config(
     "preprocessing", "encoding", "mapping"
-)
-
-HANDLE_MISSING = get_config(
-    "preprocessing", "handle_missing_values", default=True
-)
-
-DROP_DUPLICATES = get_config(
-    "preprocessing", "drop_duplicates", default=True
 )
 
 CONFIG_FEATURE_SPACES = get_config(
@@ -151,33 +144,11 @@ def load_data():
             f"Dataset not found: {DATA_PATH}"
         )
 
-    df = pd.read_csv(DATA_PATH)
-
-    if DROP_DUPLICATES:
-        df = df.drop_duplicates()
-
-    if HANDLE_MISSING:
-        df = df.dropna()
-
-    df = df.copy()
+    df = clean_records(pd.read_csv(DATA_PATH))
 
     if "Gender" not in df.columns:
         raise ValueError(
             "Gender column not found in dataset."
-        )
-
-    if not GENDER_MAPPING:
-        raise ValueError(
-            "Gender mapping is missing in config.yaml."
-        )
-
-    gender_values = df["Gender"].astype(str).str.strip()
-
-    df["Gender"] = gender_values.map(GENDER_MAPPING)
-
-    if df["Gender"].isna().any():
-        raise ValueError(
-            "Unexpected Gender values detected."
         )
 
     print("Dataset shape:", df.shape)
@@ -313,9 +284,10 @@ def run_experiments(df):
 
             scaler = scaler_class()
 
-            X = scaler.fit_transform(
-                df[features]
+            feature_frame = prepare_feature_frame(
+                df, features, GENDER_MAPPING
             )
+            X = scaler.fit_transform(feature_frame)
 
             for k in K_VALUES:
 

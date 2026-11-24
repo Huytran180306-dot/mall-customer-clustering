@@ -115,25 +115,36 @@ behavior_analysis:
 
 
 # ============================================================
-# 6. FINAL MODEL CONFIGURATION
+# 6. COMPARISON ANALYSIS
 # ============================================================
 
-final_model:
-  name: KMeans
-
+comparison_analysis:
+  enabled: true
   feature_space: with_gender
   scaler: MinMaxScaler
-
   n_clusters: 2
   max_iterations: 300
   tolerance: 0.0001
   random_state: 42
-
   initialization: k-means++
 
 
 # ============================================================
-# 7. MODEL EVALUATION
+# 7. FINAL MODEL CONFIGURATION
+# ============================================================
+
+final_model:
+  name: KMeans
+  feature_space: without_gender
+  scaler: StandardScaler
+  n_clusters: 6
+  max_iterations: 300
+  tolerance: 0.0001
+  random_state: 42
+  initialization: k-means++
+
+  # ============================================================
+# MODEL EVALUATION
 # ============================================================
 
 evaluation:
@@ -172,3 +183,16 @@ paths:
 
   progress: progress_results/
   docs: docs/
+
+  # ============================================================
+# OUTLIER ANALYSIS CONFIGURATION
+# ============================================================
+
+outlier_analysis:
+  enabled: true
+  method: IQR
+  multiplier: 1.5
+  features:
+    - Age
+    - "Annual Income (k$)"
+    - "Spending Score (1-100)"

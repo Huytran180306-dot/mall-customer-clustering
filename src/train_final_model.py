@@ -13,7 +13,6 @@ import json
 from pathlib import Path
 
 import joblib
-import numpy as np
 import pandas as pd
 
 from sklearn.preprocessing import StandardScaler, MinMaxScaler
@@ -30,6 +29,7 @@ if str(ROOT_DIR) not in sys.path:
 
 from src.config import get_config, get_path
 from src.models.kmeans import KMeans
+from src.feature_processing import clean_records, prepare_feature_frame
 
 
 # ============================================================
@@ -112,43 +112,8 @@ def load_data():
     if not DATA_PATH.exists():
         raise FileNotFoundError(DATA_PATH)
 
-    df = pd.read_csv(DATA_PATH)
-
-    missing_columns = [
-        column for column in FEATURE_COLUMNS
-        if column not in df.columns
-    ]
-
-    if missing_columns:
-        raise ValueError(
-            f"Missing features: {missing_columns}"
-        )
-
-    X = df[FEATURE_COLUMNS].copy()
-
-    if "Gender" in X.columns:
-
-        gender_values = (
-            X["Gender"]
-            .astype(str)
-            .str.strip()
-            .str.title()
-        )
-
-        X["Gender"] = gender_values.map(
-            GENDER_MAPPING
-        )
-
-    for column in X.columns:
-        X[column] = pd.to_numeric(
-            X[column],
-            errors="coerce"
-        )
-
-    if not np.isfinite(X.to_numpy(dtype=float)).all():
-        raise ValueError(
-            "Dataset contains missing or invalid features."
-        )
+    df = clean_records(pd.read_csv(DATA_PATH))
+    X = prepare_feature_frame(df, FEATURE_COLUMNS, GENDER_MAPPING)
 
     print("Dataset shape:", X.shape)
     print("Features:", FEATURE_COLUMNS)

@@ -27,6 +27,7 @@ if str(ROOT_DIR) not in sys.path:
 
 from src.config import get_config, get_path
 from src.models.kmeans import KMeans
+from src.feature_processing import clean_records, prepare_feature_frame
 
 
 # ============================================================
@@ -67,23 +68,7 @@ def load_data():
             f"Dataset not found: {DATA_PATH}"
         )
 
-    df = pd.read_csv(DATA_PATH)
-
-    if get_config(
-        "preprocessing",
-        "drop_duplicates",
-        default=True
-    ):
-        df = df.drop_duplicates()
-
-    if get_config(
-        "preprocessing",
-        "handle_missing_values",
-        default=True
-    ):
-        df = df.dropna()
-
-    df = df.copy()
+    df = clean_records(pd.read_csv(DATA_PATH))
 
     required_columns = [
         "CustomerID",
@@ -121,40 +106,7 @@ def prepare_features(df, feature_space):
 
     features = FEATURE_SPACES[feature_space]
 
-    missing_columns = [
-        column for column in features
-        if column not in df.columns
-    ]
-
-    if missing_columns:
-        raise ValueError(
-            f"Missing features: {missing_columns}"
-        )
-
-    X = df[features].copy()
-
-    if "Gender" in features:
-
-        gender_values = (
-            X["Gender"].astype(str).str.strip()
-        )
-
-        encoded = gender_values.map(GENDER_MAPPING)
-
-        if encoded.isna().any():
-            unknown_values = (
-                gender_values[encoded.isna()]
-                .unique()
-                .tolist()
-            )
-
-            raise ValueError(
-                f"Unknown Gender values: {unknown_values}"
-            )
-
-        X["Gender"] = encoded.astype(int)
-
-    return X
+    return prepare_feature_frame(df, features, GENDER_MAPPING)
 
 
 # ============================================================
@@ -348,7 +300,7 @@ def main():
         ),
         (
             "with_gender_minmax_k2",
-            get_config("final_model")
+            get_config("comparison_analysis")
         )
     ]
 

@@ -1,0 +1,3 @@
+﻿Row_Index,CustomerID,Feature,Value,Lower_Bound,Upper_Bound,Outlier_Type
+198,199,Annual Income (k$),137,-13.25,132.75,Above Upper Bound
+199,200,Annual Income (k$),137,-13.25,132.75,Above Upper Bound

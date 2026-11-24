@@ -12,6 +12,7 @@ Responsibilities:
 
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
@@ -52,6 +53,42 @@ AGE_COLUMN = NUMERIC_FEATURES[0]
 INCOME_COLUMN = NUMERIC_FEATURES[1]
 
 SPENDING_COLUMN = NUMERIC_FEATURES[2]
+
+# Outlier analysis configuration
+RESULT_DIR = get_path("paths", "progress")
+
+OUTLIER_CONFIG = get_config(
+    "outlier_analysis",
+    default={}
+)
+
+OUTLIER_ENABLED = OUTLIER_CONFIG.get(
+    "enabled",
+    True
+)
+
+OUTLIER_METHOD = OUTLIER_CONFIG.get(
+    "method",
+    "IQR"
+)
+
+IQR_MULTIPLIER = float(
+    OUTLIER_CONFIG.get("multiplier", 1.5)
+)
+
+OUTLIER_FEATURES = get_config(
+    "outlier_analysis",
+    "features",
+    default=NUMERIC_FEATURES
+)
+
+OUTLIER_SUMMARY_PATH = (
+    RESULT_DIR / "outlier_analysis.csv"
+)
+
+OUTLIER_RECORDS_PATH = (
+    RESULT_DIR / "outlier_records.csv"
+)
 
 
 # ============================================================
@@ -113,6 +150,7 @@ def load_data():
 
 def analyze_data_quality(df):
 
+
     print("\n========== MISSING VALUES ==========")
 
     print(df.isnull().sum())
@@ -128,6 +166,195 @@ def analyze_data_quality(df):
     print("\n========== STATISTICS ==========")
 
     print(df.describe())
+
+# ============================================================
+# OUTLIER DETECTION - IQR METHOD
+# ============================================================
+
+def analyze_outliers_iqr(df):
+
+    print("\n========== OUTLIER ANALYSIS - IQR ==========")
+
+    if not OUTLIER_ENABLED:
+        print("Outlier analysis is disabled.")
+        return None
+
+    if OUTLIER_METHOD.upper() != "IQR":
+        raise ValueError(
+            f"Unsupported method: {OUTLIER_METHOD}"
+        )
+
+    if IQR_MULTIPLIER <= 0:
+        raise ValueError(
+            "IQR multiplier must be greater than 0."
+        )
+
+    RESULT_DIR.mkdir(
+        parents=True,
+        exist_ok=True
+    )
+
+    summary_records = []
+    detail_records = []
+
+    for feature in OUTLIER_FEATURES:
+
+        if feature not in df.columns:
+            raise ValueError(
+                f"Feature not found: {feature}"
+            )
+
+        values = pd.to_numeric(
+            df[feature],
+            errors="coerce"
+        )
+
+        invalid_mask = (
+            df[feature].notna()
+            & values.isna()
+        )
+
+        if invalid_mask.any():
+            raise ValueError(
+                f"Non-numeric values in {feature}"
+            )
+
+        valid_values = values.dropna()
+
+        if valid_values.empty:
+            raise ValueError(
+                f"No valid values in {feature}"
+            )
+
+        if not np.isfinite(valid_values.to_numpy()).all():
+            raise ValueError(
+                f"Infinite values detected in {feature}"
+            )
+
+        # Calculate quartiles
+        q1 = valid_values.quantile(0.25)
+        q3 = valid_values.quantile(0.75)
+
+        iqr = q3 - q1
+
+        lower_bound = q1 - IQR_MULTIPLIER * iqr
+        upper_bound = q3 + IQR_MULTIPLIER * iqr
+
+        # Detect outliers
+        outlier_mask = (
+            (values < lower_bound)
+            | (values > upper_bound)
+        ).fillna(False)
+
+        outlier_count = int(outlier_mask.sum())
+        valid_count = len(valid_values)
+
+        percentage = (
+            outlier_count / valid_count * 100
+        )
+
+        # Save summary
+        summary_records.append({
+
+            "Feature": feature,
+            "Q1": q1,
+            "Q3": q3,
+            "IQR": iqr,
+            "Lower_Bound": lower_bound,
+            "Upper_Bound": upper_bound,
+            "Minimum": valid_values.min(),
+            "Maximum": valid_values.max(),
+            "Valid_Count": valid_count,
+            "Outlier_Count": outlier_count,
+            "Outlier_Percentage": percentage
+
+        })
+
+        # Save individual outliers
+        for row_pos in range(len(df)):
+
+            if not outlier_mask.iloc[row_pos]:
+                continue
+
+            value = values.iloc[row_pos]
+
+            detail_records.append({
+
+                "Row_Index": row_pos,
+
+                "CustomerID": df.iloc[row_pos][
+                    CUSTOMER_ID_COLUMN
+                ],
+
+                "Feature": feature,
+
+                "Value": value,
+
+                "Lower_Bound": lower_bound,
+
+                "Upper_Bound": upper_bound,
+
+                "Outlier_Type": (
+                    "Below Lower Bound"
+                    if value < lower_bound
+                    else "Above Upper Bound"
+                )
+
+            })
+
+        print(f"\nFeature: {feature}")
+        print(f"Q1: {q1:.2f}")
+        print(f"Q3: {q3:.2f}")
+        print(f"IQR: {iqr:.2f}")
+        print(f"Lower Bound: {lower_bound:.2f}")
+        print(f"Upper Bound: {upper_bound:.2f}")
+        print(f"Outliers: {outlier_count}")
+        print(f"Percentage: {percentage:.2f}%")
+
+    # Export results
+    summary_df = pd.DataFrame(summary_records)
+
+    details_df = pd.DataFrame(
+        detail_records,
+        columns=[
+            "Row_Index",
+            "CustomerID",
+            "Feature",
+            "Value",
+            "Lower_Bound",
+            "Upper_Bound",
+            "Outlier_Type"
+        ]
+    )
+
+    summary_df.to_csv(
+        OUTLIER_SUMMARY_PATH,
+        index=False,
+        encoding="utf-8-sig"
+    )
+
+    details_df.to_csv(
+        OUTLIER_RECORDS_PATH,
+        index=False,
+        encoding="utf-8-sig"
+    )
+
+    print("\n========== OUTLIER SUMMARY ==========")
+
+    print(
+        summary_df[
+            [
+                "Feature",
+                "Outlier_Count",
+                "Outlier_Percentage"
+            ]
+        ].to_string(index=False)
+    )
+
+    print("\nSummary saved:", OUTLIER_SUMMARY_PATH)
+    print("Records saved:", OUTLIER_RECORDS_PATH)
+
+    return summary_df, details_df
 
 
 # ============================================================
@@ -360,6 +587,8 @@ def main():
     df = load_data()
 
     analyze_data_quality(df)
+
+    analyze_outliers_iqr(df)
 
     plot_gender_distribution(df)
 
